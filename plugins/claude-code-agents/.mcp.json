@@ -2,11 +2,8 @@
   "mcpServers": {
     "claude_code_agents": {
       "command": "node",
-      "args": ["${PLUGIN_ROOT}/server/index.mjs"],
-      "env": {
-        "CLAUDE_AGENTS_PLUGIN_ROOT": "${PLUGIN_ROOT}",
-        "CLAUDE_AGENTS_DATA_ROOT": "${PLUGIN_DATA}"
-      }
+      "args": ["./server/index.mjs"],
+      "cwd": "."
     }
   }
 }

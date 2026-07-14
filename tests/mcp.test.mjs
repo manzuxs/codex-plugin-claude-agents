@@ -7,7 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const server = path.join(root, 'plugins', 'claude-code-agents', 'server', 'index.mjs');
+const pluginRoot = path.join(root, 'plugins', 'claude-code-agents');
+const server = path.join(pluginRoot, 'server', 'index.mjs');
 
 function waitFor(predicate, timeoutMs = 1500) {
   const started = Date.now();
@@ -21,6 +22,33 @@ function waitFor(predicate, timeoutMs = 1500) {
     tick();
   });
 }
+
+test('plugin MCP manifest launches from its installed root', async () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.mcp.json'), 'utf8'));
+  const config = manifest.mcpServers.claude_code_agents;
+  assert.equal(config.cwd, '.');
+  assert.deepEqual(config.args, ['./server/index.mjs']);
+
+  const child = spawn(config.command, config.args, {
+    cwd: path.resolve(pluginRoot, config.cwd),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const messages = [];
+  let buffer = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    let i;
+    while ((i = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, i).trim(); buffer = buffer.slice(i + 1);
+      if (line) messages.push(JSON.parse(line));
+    }
+  });
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) + '\n');
+  const response = await waitFor(() => messages.find((message) => message.id === 1));
+  child.kill('SIGTERM');
+  assert.ok(response.result.tools.some((tool) => tool.name === 'run_agent'));
+});
 
 test('MCP server initializes, lists tools, and performs a dry-run delegation', async () => {
   const child = spawn(process.execPath, [server], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
