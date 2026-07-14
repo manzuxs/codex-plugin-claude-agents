@@ -1,0 +1,19 @@
+README.md
+  s_eacf6a2968fd4d::t_962a6428d66a07 119,126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "c4b140a3edeceb08f8fcb5e6adf1d29086a30fe7",
+  "prompts": {},
+  "sessions": {
+    "s_eacf6a2968fd4d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5eb8-a36d-7723-a357-ef503e3f3b8c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
