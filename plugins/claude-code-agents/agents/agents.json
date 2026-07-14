@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "id": "architect",
+      "name": "架构师",
+      "aliases": [
+        "architect",
+        "架构师",
+        "系统架构师",
+        "软件架构师"
+      ],
+      "prefix": "ARCHITECT",
+      "prompt": "architect.xml",
+      "defaultPermissionMode": "plan",
+      "summary": "系统边界、质量属性、演进路径、ADR 与风险分析。"
+    },
+    {
+      "id": "backend-engineer",
+      "name": "后端工程师",
+      "aliases": [
+        "backend",
+        "backend engineer",
+        "后端",
+        "后端工程师"
+      ],
+      "prefix": "BACKEND_ENGINEER",
+      "prompt": "backend-engineer.xml",
+      "defaultPermissionMode": "auto",
+      "summary": "API、领域模型、数据一致性、可靠性、性能、安全与可观测性。"
+    },
+    {
+      "id": "frontend-engineer",
+      "name": "前端工程师",
+      "aliases": [
+        "frontend",
+        "frontend engineer",
+        "前端",
+        "前端工程师"
+      ],
+      "prefix": "FRONTEND_ENGINEER",
+      "prompt": "frontend-engineer.xml",
+      "defaultPermissionMode": "auto",
+      "summary": "组件架构、状态管理、可访问性、性能、测试与工程化。"
+    },
+    {
+      "id": "ui-designer",
+      "name": "UI设计师",
+      "aliases": [
+        "ui",
+        "ui designer",
+        "UI设计师",
+        "界面设计师",
+        "设计工程师"
+      ],
+      "prefix": "UI_DESIGNER",
+      "prompt": "ui-designer.xml",
+      "defaultPermissionMode": "auto",
+      "summary": "信息层级、设计系统、交互状态、可访问性与像素级落地。"
+    },
+    {
+      "id": "fullstack-engineer",
+      "name": "全栈工程师",
+      "aliases": [
+        "fullstack",
+        "full-stack",
+        "全栈",
+        "全栈工程师"
+      ],
+      "prefix": "FULLSTACK_ENGINEER",
+      "prompt": "fullstack-engineer.xml",
+      "defaultPermissionMode": "auto",
+      "summary": "跨前后端纵向切片、接口契约、数据流、交付与回归。"
+    },
+    {
+      "id": "qa-engineer",
+      "name": "测试工程师",
+      "aliases": [
+        "qa",
+        "test engineer",
+        "测试",
+        "测试工程师",
+        "QA工程师"
+      ],
+      "prefix": "QA_ENGINEER",
+      "prompt": "qa-engineer.xml",
+      "defaultPermissionMode": "auto",
+      "summary": "风险驱动测试、测试金字塔、可复现性、回归与质量门禁。"
+    },
+    {
+      "id": "security-engineer",
+      "name": "安全工程师",
+      "aliases": [
+        "security",
+        "security engineer",
+        "安全",
+        "安全工程师"
+      ],
+      "prefix": "SECURITY_ENGINEER",
+      "prompt": "security-engineer.xml",
+      "defaultPermissionMode": "plan",
+      "summary": "威胁建模、认证授权、数据保护、供应链与安全验证。"
+    },
+    {
+      "id": "devops-engineer",
+      "name": "DevOps/SRE工程师",
+      "aliases": [
+        "devops",
+        "sre",
+        "运维工程师",
+        "DevOps工程师",
+        "SRE工程师"
+      ],
+      "prefix": "DEVOPS_ENGINEER",
+      "prompt": "devops-engineer.xml",
+      "defaultPermissionMode": "auto",
+      "summary": "CI/CD、基础设施即代码、可观测性、SLO、发布与回滚。"
+    }
+  ]
+}

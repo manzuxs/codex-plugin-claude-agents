@@ -1,0 +1,36 @@
+{
+  "name": "claude-code-agents",
+  "version": "0.2.0+codex.20260714080510",
+  "description": "Codex delegates an existing approved plan to role-specialized Claude Code CLI agents using native --agents/--agent support.",
+  "author": {
+    "name": "Local Developer"
+  },
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "claude-code",
+    "multi-agent",
+    "delegation",
+    "software-engineering"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Claude Code Agents",
+    "shortDescription": "Delegate Codex plans to Claude Code specialists",
+    "longDescription": "Codex keeps planning and review responsibility, then passes the existing approved plan to a local Claude Code CLI specialist loaded through native custom-agent flags.",
+    "developerName": "Local Developer",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Execute commands"
+    ],
+    "defaultPrompt": [
+      "\u5148\u5236\u5b9a\u8ba1\u5212\uff0c\u7136\u540e\u542f\u7528\u540e\u7aef\u5de5\u7a0b\u5e08\u667a\u80fd\u4f53\u6267\u884c\u3002",
+      "\u542f\u7528\u67b6\u6784\u5e08\u667a\u80fd\u4f53\u8bc4\u5ba1\u5f53\u524d\u7cfb\u7edf\u8bbe\u8ba1\u3002",
+      "\u5148\u89c4\u5212\uff0c\u518d\u542f\u7528 UI \u8bbe\u8ba1\u5e08\u667a\u80fd\u4f53\u5b9e\u73b0\u9875\u9762\u3002"
+    ],
+    "brandColor": "#10A37F"
+  }
+}

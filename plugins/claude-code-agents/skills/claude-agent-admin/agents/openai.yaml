@@ -1,0 +1,12 @@
+interface:
+  display_name: "Claude Code Agents 配置"
+  short_description: "配置模型、effort、网关、密钥与智能体"
+  brand_color: "#10A37F"
+  default_prompt: "检查并配置 Claude Code Agents 插件，优先使用 dry-run 和非秘密配置视图。"
+policy:
+  allow_implicit_invocation: true
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "claude_code_agents"
+      description: "本地 Claude Code CLI 多智能体 MCP server"

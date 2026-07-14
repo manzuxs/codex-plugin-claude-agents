@@ -1,0 +1,7 @@
+.env
+*.log
+.DS_Store
+node_modules/
+coverage/
+.tmp/
+plugins/claude-code-agents/.data/

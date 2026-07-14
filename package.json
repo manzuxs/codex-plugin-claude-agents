@@ -1,0 +1,17 @@
+{
+  "name": "codex-plugin-claude-agents-marketplace",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Codex plugin marketplace that delegates approved plans to role-specialized Claude Code CLI agents.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "doctor": "node plugins/claude-code-agents/scripts/doctor.mjs",
+    "list-agents": "node plugins/claude-code-agents/server/cli.mjs list",
+    "dry-run": "node plugins/claude-code-agents/server/cli.mjs run --agent backend-engineer --task 'dry run' --plan 'inspect only' --dry-run"
+  },
+  "engines": {
+    "node": ">=18.18"
+  },
+  "license": "MIT"
+}
