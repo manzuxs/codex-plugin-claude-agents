@@ -1,0 +1,24 @@
+plugins/claude-code-agents/.mcp.json
+  s_eacf6a2968fd4d::t_ab7ef430b8029e 5-6
+tests/mcp.test.mjs
+  s_eacf6a2968fd4d::t_ab7ef430b8029e 10-11,26-51
+  s_eacf6a2968fd4d::t_0aea33a4ce70c9 52
+plugins/claude-code-agents/.codex-plugin/plugin.json
+  s_eacf6a2968fd4d::t_349e98f85409d0 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "9f2ea59071a7879a11014b2412773a486653f26a",
+  "prompts": {},
+  "sessions": {
+    "s_eacf6a2968fd4d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5eb8-a36d-7723-a357-ef503e3f3b8c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
