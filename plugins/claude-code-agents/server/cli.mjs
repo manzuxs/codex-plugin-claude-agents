@@ -39,6 +39,8 @@ try {
     context: readMaybeFile(values.context),
     cwd: values.cwd || process.cwd(),
     background: Boolean(values.background),
+    persistOnDisconnect: Boolean(values.persistOnDisconnect),
+    leaseTimeoutMs: values.leaseTimeoutMs ? Number(values.leaseTimeoutMs) : undefined,
     dryRun: Boolean(values.dryRun),
     model: values.model,
     effort: values.effort,
@@ -53,7 +55,7 @@ try {
   else {
     console.log(`Usage:
   cli.mjs list [--cwd PATH]
-  cli.mjs run --agent ID --task TEXT|@FILE --plan TEXT|@FILE [--cwd PATH] [--background] [--dry-run]
+  cli.mjs run --agent ID --task TEXT|@FILE --plan TEXT|@FILE [--cwd PATH] [--background] [--persist-on-disconnect] [--lease-timeout-ms 90000] [--dry-run]
   cli.mjs status [JOB_ID] [--full] [--limit 5]
   cli.mjs result [JOB_ID] [--full] [--max-text-chars 12000]
   cli.mjs cancel JOB_ID`);

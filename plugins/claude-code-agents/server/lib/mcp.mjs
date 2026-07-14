@@ -22,6 +22,8 @@ const TOOL_DEFINITIONS = [
         context: { type: 'string' },
         cwd: { type: 'string', description: 'Target repository. Defaults to the current directory.' },
         background: { type: 'boolean', default: false },
+        persistOnDisconnect: { type: 'boolean', default: false, description: 'Allow a background job to continue after the Codex session stops. Use only when explicitly requested.' },
+        leaseTimeoutMs: { type: 'integer', minimum: 30000, maximum: 600000, default: 90000, description: 'Background job lease renewed by job_status.' },
         dryRun: { type: 'boolean', default: false },
         codexReviewRequired: { type: 'boolean', default: true },
         resume: { type: 'string', description: 'Optional Claude session id or selector to resume.' },
@@ -87,6 +89,8 @@ export class McpServer {
   constructor(service) {
     this.service = service;
     this.buffer = '';
+    this.activeRequests = new Map();
+    this.stopped = false;
   }
 
   send(payload) {
@@ -104,7 +108,11 @@ export class McpServer {
   async handle(message) {
     if (!message || message.jsonrpc !== '2.0') return;
     const { id, method, params = {} } = message;
-    if (method === 'notifications/initialized' || method === 'notifications/cancelled') return;
+    if (method === 'notifications/initialized') return;
+    if (method === 'notifications/cancelled') {
+      this.activeRequests.get(params.requestId)?.abort('mcp_request_cancelled');
+      return;
+    }
     if (method === 'initialize') {
       this.success(id, {
         protocolVersion: params.protocolVersion || '2025-06-18',
@@ -128,7 +136,15 @@ export class McpServer {
         const args = params.arguments || {};
         let value;
         if (name === 'list_agents') value = this.service.listAgents({ cwd: args.cwd });
-        else if (name === 'run_agent') value = await this.service.run({ ...args, cwd: args.cwd || process.cwd() });
+        else if (name === 'run_agent') {
+          const controller = new AbortController();
+          this.activeRequests.set(id, controller);
+          try {
+            value = await this.service.run({ ...args, cwd: args.cwd || process.cwd(), signal: controller.signal });
+          } finally {
+            this.activeRequests.delete(id);
+          }
+        }
         else if (name === 'job_status') value = this.service.status(args.job_id, { full: args.full, limit: args.limit });
         else if (name === 'job_result') value = this.service.result(args.job_id, { full: args.full, maxTextChars: args.max_text_chars });
         else if (name === 'job_cancel') value = this.service.cancel(args.job_id);
@@ -144,20 +160,27 @@ export class McpServer {
 
   start() {
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', async (chunk) => {
+    process.stdin.on('data', (chunk) => {
       this.buffer += chunk;
       let index;
       while ((index = this.buffer.indexOf('\n')) >= 0) {
         const line = this.buffer.slice(0, index).trim();
         this.buffer = this.buffer.slice(index + 1);
         if (!line) continue;
-        try {
-          await this.handle(JSON.parse(line));
-        } catch (error) {
-          process.stderr.write(`MCP parse/dispatch error: ${error.message}\n`);
-        }
+        try { void this.handle(JSON.parse(line)).catch((error) => process.stderr.write(`MCP dispatch error: ${error.message}\n`)); }
+        catch (error) { process.stderr.write(`MCP parse error: ${error.message}\n`); }
       }
     });
+    process.stdin.once('end', () => this.shutdown('mcp_stdin_closed'));
+    process.once('SIGTERM', () => { this.shutdown('mcp_terminated'); process.exit(0); });
+    process.once('SIGINT', () => { this.shutdown('mcp_interrupted'); process.exit(0); });
     process.stdin.resume();
+  }
+
+  shutdown(reason) {
+    if (this.stopped) return;
+    this.stopped = true;
+    for (const controller of this.activeRequests.values()) controller.abort(reason);
+    this.service.dispose(reason);
   }
 }

@@ -4,7 +4,7 @@ Validation date: 2026-07-14
 
 ## Result
 
-- Node test suites: **15 passed, 0 failed**
+- Node test suites: **20 passed, 0 failed**
 - JavaScript syntax checks: passed
 - JSON manifests and agent registry: parsed successfully
 - MCP initialize / tools/list / dry-run: passed
@@ -16,6 +16,10 @@ Validation date: 2026-07-14
 - Compact job status and result views preserve review evidence without returning raw event streams by default
 - JSON objects, JSON event arrays, and line-delimited `stream-json` results are parsed successfully
 - Full stored output remains available through the explicit diagnostic result mode
+- MCP request cancellation terminates the active Claude process group
+- Background jobs cancel when their 90-second session lease is not renewed
+- MCP service disposal cancels owned non-persistent jobs
+- Explicit persistent jobs survive MCP service disposal and complete normally
 
 ## Claude CLI compatibility checked against supplied `claude --help`
 

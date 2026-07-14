@@ -6,6 +6,16 @@ import { collectSensitiveValues, redactText } from './redact.mjs';
 
 const MAX_CAPTURE_BYTES = 20 * 1024 * 1024;
 
+function terminateProcessTree(child, signal) {
+  if (!child?.pid) return;
+  try {
+    if (process.platform !== 'win32') process.kill(-child.pid, signal);
+    else child.kill(signal);
+  } catch {
+    try { child.kill(signal); } catch {}
+  }
+}
+
 function appendWithLimit(current, chunk, label) {
   const next = current + chunk;
   if (Buffer.byteLength(next, 'utf8') > MAX_CAPTURE_BYTES) {
@@ -110,7 +120,7 @@ export function parseClaudeOutput(stdout, outputFormat) {
   }
 }
 
-export async function runClaude({ pluginRoot, agent, runtime, request, cwd }) {
+export async function runClaude({ pluginRoot, agent, runtime, request, cwd, signal: abortSignal }) {
   const invocation = buildClaudeInvocation({ pluginRoot, agent, runtime, request });
   const startedAt = new Date().toISOString();
   if (request.dryRun) {
@@ -141,34 +151,50 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd }) {
       cwd,
       env: invocation.env,
       shell: false,
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
     let settled = false;
-    const timeout = setTimeout(() => {
+    let cancelled = false;
+    let timedOut = false;
+    let forceKillTimer;
+    const stopChild = (reason) => {
       if (settled) return;
-      child.kill('SIGTERM');
-      setTimeout(() => child.kill('SIGKILL'), 3000).unref();
+      if (reason === 'cancelled') cancelled = true;
+      if (reason === 'timeout') timedOut = true;
+      terminateProcessTree(child, 'SIGTERM');
+      if (!forceKillTimer) forceKillTimer = setTimeout(() => terminateProcessTree(child, 'SIGKILL'), 3000).unref();
+    };
+    const onAbort = () => stopChild('cancelled');
+    if (abortSignal?.aborted) onAbort();
+    else abortSignal?.addEventListener('abort', onAbort, { once: true });
+    const timeout = setTimeout(() => {
+      stopChild('timeout');
     }, runtime.timeoutMs);
 
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
       try { stdout = appendWithLimit(stdout, chunk, 'stdout'); }
-      catch (error) { child.kill('SIGTERM'); reject(error); }
+      catch (error) { terminateProcessTree(child, 'SIGTERM'); reject(error); }
     });
     child.stderr.on('data', (chunk) => {
       try { stderr = appendWithLimit(stderr, chunk, 'stderr'); }
-      catch (error) { child.kill('SIGTERM'); reject(error); }
+      catch (error) { terminateProcessTree(child, 'SIGTERM'); reject(error); }
     });
     child.on('error', (error) => {
       clearTimeout(timeout);
+      clearTimeout(forceKillTimer);
+      abortSignal?.removeEventListener('abort', onAbort);
       settled = true;
       reject(new Error(`Failed to start Claude Code CLI (${invocation.command}): ${error.message}`));
     });
     child.on('close', (code, signal) => {
       clearTimeout(timeout);
+      clearTimeout(forceKillTimer);
+      abortSignal?.removeEventListener('abort', onAbort);
       if (settled) return;
       settled = true;
       const secrets = collectSensitiveValues(invocation.env);
@@ -177,7 +203,10 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd }) {
       const parsed = parseClaudeOutput(safeStdout, runtime.outputFormat);
       const finishedAt = new Date().toISOString();
       resolve({
-        ok: code === 0,
+        ok: code === 0 && !cancelled && !timedOut,
+        cancelled,
+        timedOut,
+        cancellationReason: cancelled ? String(abortSignal?.reason || 'cancelled') : undefined,
         agent: agent.id,
         planSha256: request.planSha256 || null,
         cwd,

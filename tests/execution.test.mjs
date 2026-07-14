@@ -10,6 +10,15 @@ import { runClaude } from '../plugins/claude-code-agents/server/lib/claude.mjs';
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'plugins', 'claude-code-agents');
 
+async function waitForFile(filePath, timeoutMs = 3000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (fs.existsSync(filePath)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for ${filePath}`);
+}
+
 test('real child-process delegation preserves the approved Codex plan', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-test-'));
   const capture = path.join(temp, 'capture.json');
@@ -58,4 +67,40 @@ process.stdout.write(JSON.stringify({ result: 'implemented and tested', session_
   assert.ok(seen.agents['backend-engineer'].prompt.includes('<methodology>'));
   assert.equal(seen.positional.length, 1);
   assert.ok(seen.positional[0].includes(approvedPlan));
+});
+
+test('AbortSignal terminates an active Claude process group', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-cancel-'));
+  const startedFile = path.join(temp, 'started');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.writeFileSync(process.env.MOCK_STARTED_PATH, 'started');
+setInterval(() => {}, 1000);
+`);
+  fs.chmodSync(mock, 0o755);
+
+  const registry = loadAgentRegistry(pluginRoot);
+  const agent = resolveAgent(registry, '后端工程师');
+  const runtime = resolveAgentRuntime({
+    agent,
+    env: {},
+    overrides: { claudeBin: mock, timeoutMs: 10_000, extraEnv: { MOCK_STARTED_PATH: startedFile } },
+  });
+  const controller = new AbortController();
+  const running = runClaude({
+    pluginRoot,
+    agent,
+    runtime,
+    cwd: temp,
+    signal: controller.signal,
+    request: { task: 'Wait until cancelled', plan: '1. Wait.', planSha256: 'cancel-plan' },
+  });
+  await waitForFile(startedFile);
+  controller.abort('mcp_request_cancelled');
+  const result = await running;
+  assert.equal(result.ok, false);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.cancellationReason, 'mcp_request_cancelled');
 });

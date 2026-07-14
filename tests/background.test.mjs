@@ -87,3 +87,105 @@ test('background status and result are compact by default with full diagnostics 
   assert.equal(legacy.result.sessionId, 'legacy-session');
   assert.equal(legacy.result.turns, 7);
 });
+
+test('background worker cancels when its session lease expires', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-lease-'));
+  const dataRoot = path.join(temp, 'data');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, `#!/usr/bin/env node
+setInterval(() => {}, 1000);
+`);
+  fs.chmodSync(mock, 0o755);
+
+  const previous = process.env.CLAUDE_BIN;
+  process.env.CLAUDE_BIN = mock;
+  try {
+    const service = new ClaudeAgentService({ pluginRoot, dataRoot });
+    const created = await service.run({
+      agent: '后端工程师',
+      task: 'Stop after the lease expires',
+      plan: '1. Wait for cancellation.',
+      cwd: temp,
+      background: true,
+      leaseTimeoutMs: 1000,
+    });
+    assert.equal(created.persistOnDisconnect, false);
+    assert.equal(created.leaseTimeoutMs, 1000);
+    const finished = await waitFor(() => {
+      const status = service.jobs.get(created.jobId);
+      return status.status === 'cancelled' ? status : null;
+    });
+    assert.equal(finished.cancellationReason, 'lease_expired');
+    const stored = service.result(created.jobId);
+    assert.equal(stored.result.cancelled, true);
+    assert.equal(stored.result.cancellationReason, 'lease_expired');
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_BIN;
+    else process.env.CLAUDE_BIN = previous;
+  }
+});
+
+test('service disposal cancels owned non-persistent background jobs', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-dispose-'));
+  const dataRoot = path.join(temp, 'data');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, `#!/usr/bin/env node
+setInterval(() => {}, 1000);
+`);
+  fs.chmodSync(mock, 0o755);
+
+  const previous = process.env.CLAUDE_BIN;
+  process.env.CLAUDE_BIN = mock;
+  try {
+    const service = new ClaudeAgentService({ pluginRoot, dataRoot });
+    const created = await service.run({
+      agent: '后端工程师',
+      task: 'Stop when MCP disconnects',
+      plan: '1. Wait for cancellation.',
+      cwd: temp,
+      background: true,
+      leaseTimeoutMs: 10_000,
+    });
+    service.dispose('mcp_disconnected');
+    const stopped = service.jobs.get(created.jobId);
+    assert.equal(stopped.status, 'cancelled');
+    assert.equal(stopped.cancellationReason, 'mcp_disconnected');
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_BIN;
+    else process.env.CLAUDE_BIN = previous;
+  }
+});
+
+test('explicit persistent background jobs survive service disposal', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-persist-'));
+  const dataRoot = path.join(temp, 'data');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, `#!/usr/bin/env node
+setTimeout(() => process.stdout.write(JSON.stringify({ result: 'persistent complete' })), 100);
+`);
+  fs.chmodSync(mock, 0o755);
+
+  const previous = process.env.CLAUDE_BIN;
+  process.env.CLAUDE_BIN = mock;
+  try {
+    const service = new ClaudeAgentService({ pluginRoot, dataRoot });
+    const created = await service.run({
+      agent: '后端工程师',
+      task: 'Complete after MCP disconnects',
+      plan: '1. Complete independently.',
+      cwd: temp,
+      background: true,
+      persistOnDisconnect: true,
+    });
+    service.dispose('mcp_disconnected');
+    const finished = await waitFor(() => {
+      const status = service.jobs.get(created.jobId);
+      return ['completed', 'failed', 'cancelled'].includes(status.status) ? status : null;
+    });
+    assert.equal(finished.status, 'completed');
+    assert.equal(service.result(created.jobId).result.text, 'persistent complete');
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_BIN;
+    else process.env.CLAUDE_BIN = previous;
+  }
+});

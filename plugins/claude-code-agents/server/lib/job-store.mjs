@@ -50,6 +50,13 @@ export class JobStore {
     atomicWrite(path.join(this.dir(jobId), 'result.json'), result);
   }
 
+  renewLease(jobId) {
+    const current = this.get(jobId);
+    if (current.persistOnDisconnect || !current.leaseTimeoutMs || !['queued', 'starting', 'running'].includes(current.status)) return current;
+    if (current.leaseExpiresAt && Date.now() >= Date.parse(current.leaseExpiresAt)) return current;
+    return this.writeMeta(jobId, { leaseExpiresAt: new Date(Date.now() + current.leaseTimeoutMs).toISOString() });
+  }
+
   get(jobId) {
     const meta = this.readJson(jobId, 'meta.json');
     if (!meta) throw new Error(`Job not found: ${jobId}`);

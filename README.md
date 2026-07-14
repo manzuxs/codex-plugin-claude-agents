@@ -204,6 +204,8 @@ codex plugin add claude-code-agents@local-claude-code-agents
 - `context`
 - `cwd`
 - `background`
+- `persistOnDisconnect`
+- `leaseTimeoutMs`
 - `dryRun`
 - `resume`
 - `sessionId`
@@ -219,11 +221,15 @@ codex plugin add claude-code-agents@local-claude-code-agents
 
 ## 后台执行
 
-`run_agent(background=true)` 返回 job ID。随后使用：
+`run_agent(background=true)` 返回 job ID。后台任务默认绑定 90 秒会话租约，随后使用：
 
 - `job_status`
 - `job_result`
 - `job_cancel`
+
+每次 `job_status` 会为活动任务续约。Codex 停止会话或不再查询状态后，非持久任务会在租约到期时自动终止；`job_cancel` 可立即终止。只有用户明确要求任务脱离 Codex 继续运行时，才传入 `persistOnDisconnect=true`。
+
+前台任务收到 MCP `notifications/cancelled` 时会立即终止 Claude 进程组。后台任务可通过 `leaseTimeoutMs` 调整租约，公开 MCP 接口允许 `30000` 到 `600000` 毫秒。
 
 任务数据默认写入 Codex 提供的 `PLUGIN_DATA`；直接运行时回退到 `~/.codex/claude-code-agents`。
 
@@ -250,6 +256,7 @@ node plugins/claude-code-agents/server/cli.mjs run \
 - 不默认启用 `bypassPermissions`。
 - 实施型智能体默认 `auto`，仍受 Claude Code 权限系统控制。
 - 插件不会自动替用户批准 Codex 的 MCP 写操作。
+- 后台任务默认与 Codex 会话绑定；持久执行必须由用户明确启用。
 - `planSha256` 用于审计本次委派计划，不代表实现已经通过验收。
 
 ## 验证
@@ -260,4 +267,4 @@ npm run dry-run
 npm run doctor
 ```
 
-当前自动化测试为 15/15。详细范围见 [VALIDATION.md](./VALIDATION.md)。真实模型、账户和网关必须在目标机器上完成小任务实测。
+当前自动化测试为 20/20。详细范围见 [VALIDATION.md](./VALIDATION.md)。真实模型、账户和网关必须在目标机器上完成小任务实测。

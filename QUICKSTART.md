@@ -68,7 +68,9 @@ claude -p
 按上面的计划启用后端工程师智能体后台执行。
 ```
 
-插件返回 job ID 后，Codex可使用 `job_status`、`job_result` 和 `job_cancel`。
+插件返回 job ID 后，Codex 可使用 `job_status`、`job_result` 和 `job_cancel`。后台任务默认绑定 90 秒租约，`job_status` 会续约；停止 Codex 会话后不再续约，任务会自动终止。
+
+只有明确需要任务脱离 Codex 继续运行时，才要求使用 `persistOnDisconnect=true`。普通任务不要启用持久模式。
 
 ## 5. 第一次实测建议
 
