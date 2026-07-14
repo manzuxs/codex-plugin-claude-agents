@@ -116,14 +116,14 @@ CLAUDE_DEFAULT_OUTPUT_FORMAT=json
 仓库发布到 GitHub 后，用户可以直接添加远程 Marketplace：
 
 ```bash
-codex plugin marketplace add <owner>/<repository>
+codex plugin marketplace add manzuxs/codex-plugin-claude-agents
 codex plugin add claude-code-agents@local-claude-code-agents
 ```
 
 也可以使用完整 Git URL：
 
 ```bash
-codex plugin marketplace add https://github.com/<owner>/<repository>.git
+codex plugin marketplace add https://github.com/manzuxs/codex-plugin-claude-agents.git
 codex plugin add claude-code-agents@local-claude-code-agents
 ```
 
