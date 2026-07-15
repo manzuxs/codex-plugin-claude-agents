@@ -1,0 +1,20 @@
+docs/plans/2026-07-15-stage-handoff-token-optimization.md
+  s_eacf6a2968fd4d::t_d67a249e61fb73 279,285-288,290,292,294-299,321,333-335,338,345-346,352-357,361-363,376-377,381
+  s_eacf6a2968fd4d::t_fdacab24df74eb 32-33,36,54-57,62-67,70,154,165-166,170-183,211-212,217-219,239
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f623b4656f4a397da11de1b9196c66f9a3baf687",
+  "prompts": {},
+  "sessions": {
+    "s_eacf6a2968fd4d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5eb8-a36d-7723-a357-ef503e3f3b8c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
