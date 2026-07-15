@@ -220,22 +220,26 @@ codex plugin add claude-code-agents@local-claude-code-agents
 - `maxBudgetUsd`
 - `allowedTools`
 - `disallowedTools`
-- `browserMode`：`none`、`repository`、`chrome` 或 `mcp`，仅限 `qa-engineer`
-- `browserMcpProfile`：`browserMode=mcp` 时选择预配置 profile
+- `browserMode`：`none`、`repository`、`chrome` 或 `mcp`，可用于 `ui-designer`、`frontend-engineer` 和 `qa-engineer`
+- `browserMcpProfile`：`browserMode=mcp` 时选择预配置 profile；只配置一个 profile 时可省略
 
 `resume` 和 `sessionId` 不能同时传入。
 
-### 浏览器冒烟与 E2E
+### UI、前端与 QA 浏览器验证
 
-验收标准要求真实浏览器测试时，Codex 应选择测试工程师并显式设置浏览器模式：
+验收标准要求真实浏览器时，Codex 应按职责选择智能体并显式设置浏览器模式：
 
-- `repository`：优先运行仓库已有的 Playwright/Cypress；插件不自动安装依赖。
-- `chrome`：向 Claude CLI 添加 `--chrome`，用于必须复用真实 Chrome 会话的测试。
-- `mcp`：通过 `--mcp-config` 和 `--strict-mcp-config` 加载预配置浏览器 MCP。
+- `ui-designer`：视觉验收，检查真实渲染、目标视口和交互状态并保留截图；自动断言仅在验收明确要求时必需。
+- `frontend-engineer`：实现自测，检查受影响路径、响应式与交互行为、控制台错误和可复现证据。
+- `qa-engineer`：独立冒烟、回归与 E2E，要求用户路径断言、执行命令或工具动作和证据位置。
 
-MCP profile 在 `.env` 中配置，例如 `QA_ENGINEER_BROWSER_MCP_CONFIGS_JSON={"playwright":"/absolute/path/to/playwright-mcp.json"}`。调用方只能传 `browserMcpProfile: "playwright"`，不能传任意配置路径。浏览器模式沿用用户配置的权限，不会强制覆盖；需要避免非交互审批阻塞时，可自行配置 `QA_ENGINEER_PERMISSION_MODE=bypassPermissions`。
+- `repository`：优先运行仓库已有的 Playwright/Cypress；启动前检查仓库依赖，缺失时返回与包管理器匹配的安装命令，但不自动安装。
+- `chrome`：向 Claude CLI 添加 `--chrome`，用于必须复用真实 Chrome 会话的测试；API 网关环境会提示改用 MCP，避免启动后才发现无工具。
+- `mcp`：通过 `--mcp-config` 和 `--strict-mcp-config` 加载预配置浏览器 MCP，并校验配置中至少存在一个 server。
 
-启用浏览器模式即表示真实浏览器执行是完成门禁。仅检查代码、生成脚本或运行 API/单元测试不能判定完成；缺少环境、登录态或运行依赖时必须报告 `partially completed` 或 `blocked`。
+MCP profile 在 `.env` 中按角色配置，例如 `UI_DESIGNER_BROWSER_MCP_CONFIGS_JSON`、`FRONTEND_ENGINEER_BROWSER_MCP_CONFIGS_JSON` 或 `QA_ENGINEER_BROWSER_MCP_CONFIGS_JSON={"playwright":"/absolute/path/to/playwright-mcp.json"}`。调用方只能选择 profile，不能传任意配置路径。浏览器模式沿用对应角色的用户权限配置，不会强制覆盖；需要避免非交互审批阻塞时，可自行把该角色的 `<PREFIX>_PERMISSION_MODE` 配置为 `bypassPermissions`。
+
+启用浏览器模式即表示真实浏览器执行是完成门禁。插件会核对 Claude `system/init` 中实际加载的工具，并要求观察到真实浏览器工具调用；同时按 UI 视觉验收、前端实现自测、QA 独立 E2E 应用不同证据标准。门禁失败时返回 `blocked`、失败原因和 `installationHint`，不会自动降级为 Codex 自身浏览器测试。
 
 ## 后台执行
 

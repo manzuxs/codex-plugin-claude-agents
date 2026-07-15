@@ -59,7 +59,7 @@ test('tool lists are comma joined and terminated before the positional prompt', 
   assert.match(invocation.args.at(-1), /<codex_plan>y<\/codex_plan>/);
 });
 
-test('QA browser modes build repository, Chrome, and strict preconfigured MCP invocations', () => {
+test('browser modes build repository, Chrome, and strict preconfigured MCP invocations', () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-browser-mode-'));
   const mcpConfig = path.join(temp, 'playwright-mcp.json');
   fs.writeFileSync(mcpConfig, '{}');
@@ -90,16 +90,31 @@ test('QA browser modes build repository, Chrome, and strict preconfigured MCP in
   assert.match(mcp.prompt, /mcp_profile="playwright"/);
 });
 
-test('service restricts browser modes to QA and configured MCP profiles while preserving permission configuration', async () => {
+test('service enables role-specific UI, frontend, and QA browser gates while preserving permission configuration', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-browser-guard-'));
   const service = new ClaudeAgentService({ pluginRoot, dataRoot: path.join(temp, 'data') });
   const base = { task: 'Browser smoke', plan: '1. Run browser smoke.', cwd: temp, dryRun: true };
 
-  await assert.rejects(service.run({ ...base, agent: 'backend-engineer', permissionMode: 'auto', browserMode: 'repository' }), /only available to qa-engineer/);
+  await assert.rejects(service.run({ ...base, agent: 'backend-engineer', permissionMode: 'auto', browserMode: 'repository' }), /ui-designer, frontend-engineer, and qa-engineer/);
   await assert.rejects(service.run({ ...base, agent: 'qa-engineer', permissionMode: 'auto', browserMode: 'mcp', browserMcpProfile: 'missing' }), /Unknown browser MCP profile/);
+  await assert.rejects(service.run({ ...base, agent: 'qa-engineer', permissionMode: 'auto', browserMode: 'mcp' }), /安装 Playwright MCP/);
+  await assert.rejects(service.run({ ...base, agent: 'ui-designer', permissionMode: 'auto', browserMode: 'mcp' }), /UI_DESIGNER_BROWSER_MCP_CONFIGS_JSON/);
+  await assert.rejects(service.run({ ...base, agent: 'qa-engineer', permissionMode: 'auto', browserMode: 'repository' }), /npm install -D @playwright\/test/);
+  fs.mkdirSync(path.join(temp, 'node_modules', '@playwright', 'test'), { recursive: true });
+  fs.writeFileSync(path.join(temp, 'node_modules', '@playwright', 'test', 'package.json'), '{"name":"@playwright/test","main":"index.js"}');
+  fs.writeFileSync(path.join(temp, 'node_modules', '@playwright', 'test', 'index.js'), 'export {};');
+  fs.writeFileSync(path.join(temp, 'package.json'), '{"devDependencies":{"@playwright/test":"1.0.0"}}');
   const automatic = await service.run({ ...base, agent: 'qa-engineer', permissionMode: 'auto', browserMode: 'repository' });
   assert.equal(automatic.runtime.permissionMode, 'auto');
+  assert.equal(automatic.runtime.browserPurpose, 'independent-e2e');
+  assert.match(automatic.promptPreview, /purpose="independent-e2e"/);
   assert.equal(automatic.args.includes('--dangerously-skip-permissions'), false);
+  const ui = await service.run({ ...base, agent: 'ui-designer', permissionMode: 'auto', browserMode: 'repository' });
+  assert.equal(ui.runtime.browserPurpose, 'visual-validation');
+  assert.match(ui.promptPreview, /Automated assertions are required only/);
+  const frontend = await service.run({ ...base, agent: 'frontend-engineer', permissionMode: 'auto', browserMode: 'repository' });
+  assert.equal(frontend.runtime.browserPurpose, 'implementation-validation');
+  assert.match(frontend.promptPreview, /browser console failures/);
   const bypass = await service.run({ ...base, agent: 'qa-engineer', permissionMode: 'bypassPermissions', browserMode: 'repository' });
   assert.equal(bypass.runtime.browserMode, 'repository');
   assert.equal(bypass.runtime.permissionMode, 'bypassPermissions');

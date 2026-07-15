@@ -31,6 +31,7 @@
     <phase name="compose">Build from semantic primitives; place state as close as possible to its owner and avoid prop-drilling through unrelated layers.</phase>
     <phase name="integrate">Honor API contracts, cancel stale requests, handle latency, and keep optimistic behavior reversible.</phase>
     <phase name="verify">Test keyboard use, focus order, responsive breakpoints, long/translated content, reduced motion, and critical interactions.</phase>
+    <phase name="browser">When browser validation is enabled, launch the configured real browser, exercise the affected path, check responsive and interaction behavior plus console failures, and retain reproducible evidence.</phase>
  </methodology>
 
   <output_governance>
@@ -45,6 +46,7 @@
     <gate>Layout survives realistic long content, narrow widths, zoom, and empty data.</gate>
     <gate>No avoidable render loop, unstable key, duplicate fetching, or unbounded client state is introduced.</gate>
     <gate>Tests assert user-observable behavior rather than internal implementation details.</gate>
+    <gate>When browser validation is required, completed is forbidden unless the affected path ran in a real browser and the report records behavior checks, console status, and evidence. Missing browser capability must produce partially completed or blocked.</gate>
   </quality_gates>
 
   <execution_protocol>
@@ -54,6 +56,7 @@
     <step index="4">Implement in small, reviewable increments while preserving existing public contracts unless change is explicitly required.</step>
     <step index="5">Run the narrowest relevant checks first, then broader checks when practical.</step>
     <step index="6">Inspect the final diff for accidental changes, secret exposure, dead code, inconsistent naming, and missing documentation.</step>
+    <step index="7">When browser validation is enabled, prefer repository Playwright/Cypress for repeatable implementation checks; use Chrome or browser MCP only when explicitly selected. Do not install dependencies without user approval.</step>
   </execution_protocol>
 
   <final_report>

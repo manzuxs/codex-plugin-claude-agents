@@ -80,6 +80,17 @@ test('QA prompt treats required real-browser execution as a strict completion ga
   assert.match(xml, /do not install browser dependencies without user approval/);
 });
 
+test('UI and frontend prompts require role-appropriate real-browser evidence when enabled', () => {
+  const ui = fs.readFileSync(path.join(root, 'agents', 'ui-designer.xml'), 'utf8');
+  const frontend = fs.readFileSync(path.join(root, 'agents', 'frontend-engineer.xml'), 'utf8');
+  assert.match(ui, /opening the real rendered page/);
+  assert.match(ui, /viewport and interaction-state evidence/);
+  assert.match(ui, /screenshot or equivalent reproducible visual evidence/);
+  assert.match(frontend, /affected path ran in a real browser/);
+  assert.match(frontend, /behavior checks, console status, and evidence/);
+  assert.match(frontend, /prefer repository Playwright\/Cypress/);
+});
+
 test('orchestrator requires adaptive background polling and editable stage continuation', () => {
   const skill = fs.readFileSync(path.join(root, 'skills', 'claude-orchestrator', 'SKILL.md'), 'utf8');
   assert.match(skill, /background=true/);
@@ -90,4 +101,7 @@ test('orchestrator requires adaptive background polling and editable stage conti
   assert.match(skill, /下一阶段执行计划/);
   assert.match(skill, /新任务提示/);
   assert.match(skill, /无变化时.*不输出/);
+  assert.match(skill, /ui-designer.*视觉验收/);
+  assert.match(skill, /frontend-engineer.*实现自测/);
+  assert.match(skill, /qa-engineer.*独立冒烟/);
 });

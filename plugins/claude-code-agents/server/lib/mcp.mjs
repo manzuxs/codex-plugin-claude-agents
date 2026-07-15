@@ -42,12 +42,12 @@ const TOOL_DEFINITIONS = [
           type: 'string',
           enum: ['none', 'repository', 'chrome', 'mcp'],
           default: 'none',
-          description: 'QA-only browser test mode using the resolved user-configured permission mode. repository uses project-native Playwright/Cypress; chrome enables Claude in Chrome; mcp loads a preconfigured browser MCP profile.',
+          description: 'Real-browser completion gate for ui-designer, frontend-engineer, and qa-engineer using the resolved user-configured permission mode. The server applies role-specific evidence rules, preflights the backend, and returns installation guidance instead of silently falling back.',
         },
         browserMcpProfile: {
           type: 'string',
           pattern: '^[a-z][a-z0-9-]*$',
-          description: 'Preconfigured profile name required for browserMode=mcp; arbitrary config paths are not accepted.',
+          description: 'Preconfigured profile name for browserMode=mcp. It may be omitted only when exactly one profile is configured; arbitrary config paths are not accepted.',
         }
       },
       additionalProperties: false,

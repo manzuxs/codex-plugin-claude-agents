@@ -118,6 +118,7 @@ export function publicAgentView(agent, runtime) {
       outputFormat: runtime.outputFormat,
       gatewayConfigured: Boolean(runtime.gatewayUrl),
       credentialConfigured: Boolean(runtime.apiKey),
+      browserMcpConfigured: Object.keys(runtime.browserMcpConfigs).length > 0,
     },
   };
 }

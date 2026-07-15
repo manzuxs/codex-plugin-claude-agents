@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { buildDelegationPrompt } from './xml.mjs';
 import { collectSensitiveValues, redactText } from './redact.mjs';
+import { browserUseObserved, inspectBrowserInit } from './browser.mjs';
 
 const MAX_CAPTURE_BYTES = 20 * 1024 * 1024;
 
@@ -42,6 +43,8 @@ export function buildClaudeInvocation({ pluginRoot, agent, runtime, request }) {
     context: request.context,
     browserMode: request.browserMode,
     browserMcpProfile: request.browserMcpProfile,
+    browserPurpose: request.browserPurpose,
+    browserCompletionGate: request.browserCompletionGate,
     codexReviewRequired: request.codexReviewRequired !== false,
   });
   const args = [
@@ -220,6 +223,9 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
         credentialConfigured: Boolean(runtime.apiKey),
         browserMode: request.browserMode || 'none',
         browserMcpProfile: request.browserMcpProfile || null,
+        browserBackend: request.browserBackend || null,
+        browserPurpose: request.browserPurpose || null,
+        browserExpectedMcpServers: request.browserExpectedMcpServers || [],
       },
       promptPreview: invocation.prompt.slice(0, 2000),
     };
@@ -241,17 +247,53 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
     let timedOut = false;
     let streamBuffer = '';
     let forceKillTimer;
+    let capabilityFailure = null;
+    let browserInitObserved = request.browserMode === 'repository' || request.browserMode === 'none' || !request.browserMode;
+    let browserCapabilityReady = browserInitObserved;
+    let browserToolUseObserved = false;
+    const stopChild = (reason) => {
+      if (settled) return;
+      if (reason === 'cancelled') cancelled = true;
+      if (reason === 'timeout') timedOut = true;
+      terminateProcessTree(child, 'SIGTERM');
+      if (!forceKillTimer) forceKillTimer = setTimeout(() => terminateProcessTree(child, 'SIGKILL'), 3000).unref();
+    };
     const emitProgressLine = (line) => {
-      if (!onProgress || runtime.outputFormat !== 'stream-json' || !line.trim()) return;
+      if (runtime.outputFormat !== 'stream-json' || !line.trim()) return;
       try {
-        const progress = classifyProgressEvent(JSON.parse(line));
+        const event = JSON.parse(line);
+        const capability = inspectBrowserInit(event, request);
+        if (capability) {
+          browserInitObserved = true;
+          browserCapabilityReady = capability.ok;
+          if (!capability.ok && !capabilityFailure) {
+            capabilityFailure = capability;
+            onProgress?.({
+              phase: 'blocked',
+              verificationState: 'failed',
+              browserCapability: 'missing',
+              browserBackend: request.browserBackend,
+              installationHint: capability.installationHint,
+              lastActivityAt: new Date().toISOString(),
+            });
+            stopChild('capability');
+          }
+        }
+        if (browserUseObserved(event, request)) browserToolUseObserved = true;
+        if (!onProgress) return;
+        const progress = classifyProgressEvent(event);
         if (!progress) return;
         if (progress.lastToolSummary) progress.lastToolSummary = redactText(progress.lastToolSummary, secrets).slice(0, 256);
-        onProgress({ ...progress, lastActivityAt: new Date().toISOString() });
+        onProgress({
+          ...progress,
+          browserCapability: browserCapabilityReady ? 'ready' : undefined,
+          browserBackend: request.browserBackend,
+          lastActivityAt: new Date().toISOString(),
+        });
       } catch {}
     };
     const consumeProgressChunk = (chunk) => {
-      if (!onProgress || runtime.outputFormat !== 'stream-json') return;
+      if (runtime.outputFormat !== 'stream-json') return;
       streamBuffer += chunk;
       let index;
       while ((index = streamBuffer.indexOf('\n')) >= 0) {
@@ -259,13 +301,6 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
         streamBuffer = streamBuffer.slice(index + 1);
         emitProgressLine(line);
       }
-    };
-    const stopChild = (reason) => {
-      if (settled) return;
-      if (reason === 'cancelled') cancelled = true;
-      if (reason === 'timeout') timedOut = true;
-      terminateProcessTree(child, 'SIGTERM');
-      if (!forceKillTimer) forceKillTimer = setTimeout(() => terminateProcessTree(child, 'SIGKILL'), 3000).unref();
     };
     const onAbort = () => stopChild('cancelled');
     if (abortSignal?.aborted) onAbort();
@@ -305,10 +340,23 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
       const safeStderr = redactText(stderr, secrets);
       const parsed = parseClaudeOutput(safeStdout, runtime.outputFormat);
       const finishedAt = new Date().toISOString();
+      if (request.browserMode && request.browserMode !== 'none' && !browserInitObserved && !capabilityFailure) {
+        capabilityFailure = {
+          error: '浏览器能力预检失败：Claude 会话未返回包含工具清单的 system/init 事件。',
+          installationHint: request.browserInstallationHint,
+        };
+      }
+      const executionMissing = request.browserMode && request.browserMode !== 'none'
+        && !capabilityFailure && code === 0 && !browserToolUseObserved;
+      const blocked = Boolean(capabilityFailure || executionMissing);
+      const browserError = capabilityFailure?.error || (executionMissing
+        ? '浏览器能力已加载，但未观察到真实浏览器工具调用或 Playwright/Cypress 执行；请使用同一 QA 会话重试。'
+        : undefined);
       resolve({
-        ok: code === 0 && !cancelled && !timedOut,
+        ok: code === 0 && !cancelled && !timedOut && !blocked,
         cancelled,
         timedOut,
+        blocked,
         cancellationReason: cancelled ? String(abortSignal?.reason || 'cancelled') : undefined,
         agent: agent.id,
         planSha256: request.planSha256 || null,
@@ -319,6 +367,14 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
         signal,
         stderr: safeStderr.trim() || undefined,
         ...parsed,
+        error: browserError,
+        browserCapability: request.browserMode === 'none' || !request.browserMode
+          ? 'not_required'
+          : (capabilityFailure ? 'missing' : 'ready'),
+        browserBackend: request.browserBackend,
+        browserPurpose: request.browserPurpose,
+        browserToolUseObserved,
+        installationHint: capabilityFailure?.installationHint,
       });
     });
   });

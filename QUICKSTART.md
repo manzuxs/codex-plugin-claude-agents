@@ -115,4 +115,6 @@ claude -p
 }
 ```
 
-`repository` 使用项目已有 Playwright/Cypress；`chrome` 复用 Claude in Chrome；`mcp` 还需提供 `.env` 中预配置的 `browserMcpProfile`。浏览器模式沿用用户配置的权限；如需避免非交互审批阻塞，可配置 `QA_ENGINEER_PERMISSION_MODE=bypassPermissions`。缺少依赖时仍不会自动安装。
+UI 视觉验收可把 `agent` 改为 `ui-designer`，优先使用 `mcp`/`chrome` 获取真实页面与截图；前端实现自测可使用 `frontend-engineer`，优先运行仓库 `repository` Playwright/Cypress。三者分别执行视觉验收、实现自测和独立 E2E 门禁。
+
+`chrome` 复用 Claude in Chrome（API 网关环境请改用 MCP）；`mcp` 使用对应角色 `.env` 中预配置的 profile，只有一个时可省略 `browserMcpProfile`。浏览器模式沿用用户配置的权限；如需避免非交互审批阻塞，可把对应角色的 `<PREFIX>_PERMISSION_MODE` 配置为 `bypassPermissions`。缺少依赖或工具注入失败时任务返回 `blocked` 和对应安装提示，不会自动安装，也不会静默切换成 Codex 自身浏览器。

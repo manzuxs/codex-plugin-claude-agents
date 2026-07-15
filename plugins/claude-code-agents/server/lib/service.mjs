@@ -7,6 +7,7 @@ import { assertWorkingDirectory } from './paths.mjs';
 import { runClaude } from './claude.mjs';
 import { buildEvidenceView } from './evidence.mjs';
 import { JobStore } from './job-store.mjs';
+import { browserInstallationHint, inspectRepositoryBrowser, readBrowserMcpConfig } from './browser.mjs';
 
 const DEFAULT_RESULT_TEXT_CHARS = 8000;
 const MAX_COMPACT_RESULT_BYTES = 8192;
@@ -17,6 +18,20 @@ const ACTIVE_JOB_STATUSES = new Set(['starting', 'running', 'queued']);
 const POLL_SCHEDULE_SECONDS = [30, 60, 120, 180];
 const TRUNCATION_MARKER = '\n[输出已截断]';
 const BROWSER_MODES = new Set(['none', 'repository', 'chrome', 'mcp']);
+const BROWSER_AGENT_POLICIES = Object.freeze({
+  'ui-designer': {
+    purpose: 'visual-validation',
+    completionGate: 'Do not report visual validation completed unless a real browser opened the implemented page at the required viewports, relevant interaction states were reviewed, and screenshot or equivalent reproducible evidence was recorded. Automated assertions are required only when the acceptance criteria request them.',
+  },
+  'frontend-engineer': {
+    purpose: 'implementation-validation',
+    completionGate: 'Do not report browser validation completed unless a real browser exercised the affected user path, checked observable behavior and browser console failures, and recorded reproducible evidence.',
+  },
+  'qa-engineer': {
+    purpose: 'independent-e2e',
+    completionGate: 'Do not report completed unless a real browser exercised the specified user paths, required assertions passed, and reproducible commands, tool actions, and evidence locations were recorded.',
+  },
+});
 
 function jsonBytes(value) {
   return Buffer.byteLength(JSON.stringify(value), 'utf8');
@@ -62,12 +77,12 @@ function capObject(value, maxBytes, { shrinkKeys, dropKeys, fallback }) {
 
 function compactMeta(meta) {
   if (!meta) return null;
-  const keys = ['jobId', 'status', 'agent', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'turnsObserved', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
+  const keys = ['jobId', 'status', 'agent', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'turnsObserved', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'browserCapability', 'browserBackend', 'installationHint', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
   const compact = Object.fromEntries(keys.filter((key) => meta[key] !== undefined).map((key) => [key, meta[key]]));
   if (ACTIVE_JOB_STATUSES.has(meta.status)) compact.elapsedMs = Math.max(Number(meta.elapsedMs || 0), Date.now() - Date.parse(meta.startedAt || meta.createdAt));
   else if (meta.elapsedMs !== undefined) compact.elapsedMs = meta.elapsedMs;
   return capObject(compact, MAX_COMPACT_STATUS_BYTES, {
-    shrinkKeys: ['error', 'cancellationReason', 'lastToolSummary', 'sessionId', 'planSha256', 'agent', 'jobId', 'status'],
+    shrinkKeys: ['error', 'installationHint', 'cancellationReason', 'lastToolSummary', 'sessionId', 'planSha256', 'agent', 'jobId', 'status'],
     dropKeys: ['leaseExpiresAt', 'updatedAt', 'createdAt', 'startedAt', 'finishedAt', 'lastActivityAt'],
     fallback: (current) => ({
       jobId: String(current.jobId || '').slice(0, 128),
@@ -119,13 +134,14 @@ function truncateText(value, maxChars) {
 
 function statusForResult(result) {
   if (result.cancelled) return 'cancelled';
+  if (result.blocked) return 'blocked';
   if (result.timedOut) return 'failed';
   return result.ok ? 'completed' : 'failed';
 }
 
 function capCompactResult(compact, maxBytes = MAX_COMPACT_RESULT_BYTES) {
   return capObject(compact, maxBytes, {
-    shrinkKeys: ['recommendedNextStage', 'summary', 'filesChanged', 'unfinishedItemsAndRisks', 'verificationSummary', 'outcome', 'sessionId', 'planSha256', 'jobId', 'agent', 'status'],
+    shrinkKeys: ['recommendedNextStage', 'summary', 'filesChanged', 'unfinishedItemsAndRisks', 'verificationSummary', 'installationHint', 'outcome', 'sessionId', 'planSha256', 'jobId', 'agent', 'status'],
     dropKeys: ['costUsd', 'turns', 'durationMs', 'evidenceOmissions', 'evidenceStructured'],
     fallback: (current) => ({
       status: String(current.status || 'unknown').slice(0, 32),
@@ -152,7 +168,7 @@ export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS, 
     verificationSummary: result.verificationSummary ?? terminal.verificationSummary ?? terminal.verification_summary,
   } : result;
   const compact = {};
-  const keys = ['status', 'agent', 'jobId', 'sessionId', 'planSha256', 'durationMs', 'turns', 'costUsd', 'verificationSummary'];
+  const keys = ['status', 'agent', 'jobId', 'sessionId', 'planSha256', 'durationMs', 'turns', 'costUsd', 'verificationSummary', 'blocked', 'browserCapability', 'browserBackend', 'browserPurpose', 'browserToolUseObserved', 'installationHint'];
   compact.status = source.status || statusForResult(source);
   for (const key of keys) if (source[key] !== undefined) compact[key] = key === 'verificationSummary' ? String(source[key]) : source[key];
   const summary = truncateText(source.summary ?? source.text ?? source.error ?? source.stderr, maxTextChars);
@@ -180,24 +196,65 @@ function runtimeOverrides(input) {
   };
 }
 
-function resolveBrowserRequest(input, agent, runtime) {
+function resolveBrowserRequest(input, agent, runtime, cwd) {
   const browserMode = String(input.browserMode || 'none');
-  const browserMcpProfile = String(input.browserMcpProfile || '');
+  let browserMcpProfile = String(input.browserMcpProfile || '');
+  const policy = BROWSER_AGENT_POLICIES[agent.id];
+  const configEnv = `${agent.prefix}_BROWSER_MCP_CONFIGS_JSON`;
   if (!BROWSER_MODES.has(browserMode)) {
     throw new Error(`browserMode must be one of: ${[...BROWSER_MODES].join(', ')}; received ${browserMode}`);
   }
-  if (browserMode !== 'none' && agent.id !== 'qa-engineer') {
-    throw new Error('Browser test modes are only available to qa-engineer');
+  if (browserMode !== 'none' && !policy) {
+    throw new Error('Browser modes are only available to ui-designer, frontend-engineer, and qa-engineer');
+  }
+  if (browserMode === 'repository') {
+    const repository = inspectRepositoryBrowser(cwd);
+    if (!repository.ok) throw new Error(repository.error);
+    return {
+      browserMode,
+      browserMcpProfile: '',
+      browserBackend: repository.framework,
+      browserPurpose: policy.purpose,
+      browserCompletionGate: policy.completionGate,
+      browserInstallationHint: browserInstallationHint(browserMode),
+    };
+  }
+  if (browserMode === 'chrome' && runtime.gatewayUrl) {
+    throw new Error(`Chrome browser mode is unavailable with an API gateway. ${browserInstallationHint('chrome', '', configEnv)}`);
   }
   if (browserMode === 'mcp') {
-    if (!browserMcpProfile) throw new Error('browserMcpProfile is required when browserMode=mcp');
-    if (!runtime.browserMcpConfigs[browserMcpProfile]) {
-      throw new Error(`Unknown browser MCP profile: ${browserMcpProfile}`);
+    const profiles = Object.keys(runtime.browserMcpConfigs);
+    if (!browserMcpProfile && profiles.length === 1) [browserMcpProfile] = profiles;
+    if (!browserMcpProfile && profiles.length === 0) {
+      throw new Error(`No browser MCP profile is configured. ${browserInstallationHint('mcp', '', configEnv)}`);
     }
+    if (!browserMcpProfile) throw new Error('browserMcpProfile is required when multiple browser MCP profiles are configured');
+    if (!runtime.browserMcpConfigs[browserMcpProfile]) {
+      throw new Error(`Unknown browser MCP profile: ${browserMcpProfile}. ${browserInstallationHint('mcp', browserMcpProfile, configEnv)}`);
+    }
+    let expectedServers;
+    try { expectedServers = readBrowserMcpConfig(runtime.browserMcpConfigs[browserMcpProfile]); }
+    catch (error) { throw new Error(`${error.message}. ${browserInstallationHint('mcp', browserMcpProfile, configEnv)}`); }
+    return {
+      browserMode,
+      browserMcpProfile,
+      browserBackend: `mcp:${browserMcpProfile}`,
+      browserPurpose: policy.purpose,
+      browserCompletionGate: policy.completionGate,
+      browserExpectedMcpServers: expectedServers,
+      browserInstallationHint: browserInstallationHint(browserMode, browserMcpProfile, configEnv),
+    };
   } else if (browserMcpProfile) {
     throw new Error('browserMcpProfile is only valid when browserMode=mcp');
   }
-  return { browserMode, browserMcpProfile };
+  return {
+    browserMode,
+    browserMcpProfile,
+    browserBackend: browserMode,
+    browserPurpose: browserMode === 'none' ? '' : policy?.purpose || '',
+    browserCompletionGate: browserMode === 'none' ? '' : policy?.completionGate || '',
+    browserInstallationHint: browserMode === 'none' ? '' : browserInstallationHint(browserMode, '', configEnv),
+  };
 }
 
 export class ClaudeAgentService {
@@ -245,7 +302,7 @@ export class ClaudeAgentService {
   async run(input) {
     const agent = resolveAgent(this.registry, input.agent);
     const cwd = assertWorkingDirectory(input.cwd);
-    const runtime = this.runtimeFor(agent, cwd, {
+    let runtime = this.runtimeFor(agent, cwd, {
       model: input.model,
       effort: input.effort,
       permissionMode: input.permissionMode,
@@ -253,7 +310,8 @@ export class ClaudeAgentService {
       maxBudgetUsd: input.maxBudgetUsd,
       outputFormat: input.outputFormat,
     });
-    const browser = resolveBrowserRequest(input, agent, runtime);
+    const browser = resolveBrowserRequest(input, agent, runtime, cwd);
+    if (!input.dryRun && browser.browserMode !== 'none') runtime = { ...runtime, outputFormat: 'stream-json' };
     const plan = String(input.plan || '');
     const request = {
       agent: agent.id,
