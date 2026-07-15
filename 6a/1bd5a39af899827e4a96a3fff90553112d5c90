@@ -1,0 +1,80 @@
+plugins/claude-code-agents/agents/ui-designer.xml
+  s_6b0f1583ae46f6::t_88d8e3d1109df6 34-40,60-63
+VALIDATION.md
+  s_6b0f1583ae46f6::t_cbb9ff344e7c48 3,7,15-18,22,26-28,67
+  s_6b0f1583ae46f6::t_864f9084c5b3cb 23
+plugins/claude-code-agents/server/lib/claude.mjs
+  s_6b0f1583ae46f6::t_40698d1b9b1202 93,117
+plugins/claude-code-agents/skills/claude-orchestrator/SKILL.md
+  s_6b0f1583ae46f6::t_213ef6f23e27c2 14-15,50,56-57,60,65-130
+  s_6b0f1583ae46f6::t_34f9524570ba7c 131
+plugins/claude-code-agents/agents/architect.xml
+  s_6b0f1583ae46f6::t_88d8e3d1109df6 34-40,60-63
+plugins/claude-code-agents/agents/backend-engineer.xml
+  s_6b0f1583ae46f6::t_88d8e3d1109df6 34-40,60-63
+plugins/claude-code-agents/.mcp.json
+  s_6b0f1583ae46f6::t_86d990dc0c443c 6-7
+plugins/claude-code-agents/server/lib/service.mjs
+  s_6b0f1583ae46f6::t_37bea0bfce835e 99-102
+  s_6b0f1583ae46f6::t_5bcce72905f7ee 22-25,66
+  s_6b0f1583ae46f6::t_76fa7c31d8f65d 253-257
+  s_6b0f1583ae46f6::t_7ccfe480d7d64d 10-11,28-49,61,64-65,67-81,91-96,104-113
+  s_6b0f1583ae46f6::t_946f405403f10c 97-98,103
+  s_6b0f1583ae46f6::t_e9a7a8b06e2512 156,176,189-213,217,230
+plugins/claude-code-agents/agents/devops-engineer.xml
+  s_6b0f1583ae46f6::t_88d8e3d1109df6 34-40,60-63
+plugins/claude-code-agents/agents/qa-engineer.xml
+  s_6b0f1583ae46f6::t_88d8e3d1109df6 33-39,59-62
+plugins/claude-code-agents/agents/security-engineer.xml
+  s_6b0f1583ae46f6::t_88d8e3d1109df6 34-40,60-63
+plugins/claude-code-agents/scripts/doctor.mjs
+  s_6b0f1583ae46f6::t_b2d71f4dedc687 3,45-53
+  s_6b0f1583ae46f6::t_163a1a01bda397 54
+plugins/claude-code-agents/server/lib/mcp.mjs
+  s_6b0f1583ae46f6::t_6cd6d0cd79ecdf 85
+  s_6b0f1583ae46f6::t_91531647ec6197 188-193
+  s_6b0f1583ae46f6::t_86d990dc0c443c 1-2,28,47,66,146,178-179
+tests/background.test.mjs
+  s_6b0f1583ae46f6::t_40698d1b9b1202 255
+  s_6b0f1583ae46f6::t_3f7b110b08ba85 235
+  s_6b0f1583ae46f6::t_4abd96e75f09a0 42,107-108,120,146,221
+  s_6b0f1583ae46f6::t_6cd6d0cd79ecdf 49-50,154
+  s_6b0f1583ae46f6::t_cbbee1292b016a 59-91,222-226
+  s_6b0f1583ae46f6::t_6eb0a14abf26f0 227-234,236-254,256
+plugins/claude-code-agents/agents/fullstack-engineer.xml
+  s_6b0f1583ae46f6::t_88d8e3d1109df6 33-39,59-62
+plugins/claude-code-agents/agents/frontend-engineer.xml
+  s_6b0f1583ae46f6::t_88d8e3d1109df6 34-40,60-63
+tests/mcp.test.mjs
+  s_6b0f1583ae46f6::t_3f7b110b08ba85 158,171,179
+  s_6b0f1583ae46f6::t_7c92d988df3c8e 31,94,147-149
+  s_6b0f1583ae46f6::t_b14c4df18a007c 151-157,159-170,172-178,180-187
+  s_6b0f1583ae46f6::t_7cc3ae93c58321 150
+README.md
+  s_6b0f1583ae46f6::t_87180878748bb4 44-45,226,232,236
+  s_6b0f1583ae46f6::t_fa444f02ce868d 237
+plugins/claude-code-agents/skills/claude-agent-admin/SKILL.md
+  s_6b0f1583ae46f6::t_213ef6f23e27c2 51-54
+tests/agents.test.mjs
+  s_6b0f1583ae46f6::t_1b06c424a4af76 3,40-61
+QUICKSTART.md
+  s_6b0f1583ae46f6::t_87180878748bb4 63-69,77,81-85
+plugins/claude-code-agents/.codex-plugin/plugin.json
+  s_6b0f1583ae46f6::t_f0f4f9feaec677 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "6a1bd5a39af899827e4a96a3fff90553112d5c90",
+  "prompts": {},
+  "sessions": {
+    "s_6b0f1583ae46f6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f63d3-bb81-7091-b617-9c49b74de74d",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
