@@ -51,11 +51,14 @@ test('agent prompts govern output size and fixed evidence reporting', () => {
   }
 });
 
-test('orchestrator requires foreground delegation and editable stage continuation', () => {
+test('orchestrator requires adaptive background polling and editable stage continuation', () => {
   const skill = fs.readFileSync(path.join(root, 'skills', 'claude-orchestrator', 'SKILL.md'), 'utf8');
+  assert.match(skill, /background=true/);
+  assert.match(skill, /nextPollSeconds/);
+  assert.match(skill, /30.*60.*120.*180/);
   assert.match(skill, /background=false/);
+  assert.match(skill, /静默等待/);
   assert.match(skill, /下一阶段执行计划/);
   assert.match(skill, /新任务提示/);
-  assert.match(skill, /不得.*轮询/);
-  assert.doesNotMatch(skill, /recommendedPollSeconds.*查询状态续约/);
+  assert.match(skill, /无变化时.*不输出/);
 });

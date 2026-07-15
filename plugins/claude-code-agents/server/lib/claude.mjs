@@ -81,6 +81,54 @@ function redactInvocationArgs(args) {
   return safe;
 }
 
+function extractToolUse(event) {
+  if (event?.type === 'tool_use') return event;
+  if (event?.tool_name) return { name: event.tool_name, input: event.input || event.tool_input };
+  const content = event?.message?.content || event?.content;
+  if (!Array.isArray(content)) return null;
+  return content.find((block) => block?.type === 'tool_use' || block?.name) || null;
+}
+
+function toolSummary(input) {
+  if (input === undefined || input === null) return '';
+  if (typeof input === 'string') return input.slice(0, 256);
+  if (input.command) return String(input.command).slice(0, 256);
+  for (const key of ['file_path', 'path', 'pattern', 'query']) {
+    if (input[key] !== undefined) return `${key}=${String(input[key])}`.slice(0, 256);
+  }
+  try { return JSON.stringify(input).slice(0, 256); } catch { return ''; }
+}
+
+export function classifyProgressEvent(event) {
+  if (!event || typeof event !== 'object') return null;
+  if (event.type === 'result') {
+    const verificationState = event.subtype === 'cancelled' ? 'cancelled' : (event.subtype === 'success' && !event.is_error ? 'passed' : 'failed');
+    return { phase: 'finalizing', verificationState, turnsObserved: Number(event.num_turns) || undefined };
+  }
+  if (event.type === 'system') return { phase: 'starting' };
+  const tool = extractToolUse(event);
+  if (tool) {
+    const name = String(tool.name || event.tool_name || 'unknown');
+    const lower = name.toLowerCase();
+    let phase = 'implementing';
+    if (['read', 'glob', 'grep', 'ls', 'search'].some((value) => lower === value || lower.includes(value))) phase = 'inspecting';
+    if (lower === 'bash' || lower.includes('shell')) {
+      const command = tool.input?.command || tool.input?.cmd || '';
+      phase = /test|lint|typecheck|check|vitest|jest|eslint|prettier|tsc|npm\s+(run\s+)?test/i.test(String(command)) ? 'verifying' : 'implementing';
+    }
+    if (['edit', 'write', 'multiedit', 'notebookedit'].some((value) => lower === value || lower.includes(value))) phase = 'implementing';
+    return {
+      phase,
+      lastTool: name.slice(0, 64),
+      lastToolSummary: toolSummary(tool.input),
+      verificationState: phase === 'verifying' ? 'running' : undefined,
+      turnObserved: event.type === 'assistant',
+    };
+  }
+  if (event.type === 'assistant') return { phase: 'inspecting', turnObserved: true };
+  return null;
+}
+
 function parseEventOutput(events, fallbackText) {
   const terminal = [...events].reverse().find((event) => event?.type === 'result');
   if (!terminal) return { text: fallbackText, structured: events };
@@ -122,7 +170,7 @@ export function parseClaudeOutput(stdout, outputFormat) {
   }
 }
 
-export async function runClaude({ pluginRoot, agent, runtime, request, cwd, signal: abortSignal }) {
+export async function runClaude({ pluginRoot, agent, runtime, request, cwd, signal: abortSignal, onProgress }) {
   const invocation = buildClaudeInvocation({ pluginRoot, agent, runtime, request });
   const startedAt = new Date().toISOString();
   if (request.dryRun) {
@@ -149,6 +197,7 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
   }
 
   return await new Promise((resolve, reject) => {
+    const secrets = collectSensitiveValues(invocation.env);
     const child = spawn(invocation.command, invocation.args, {
       cwd,
       env: invocation.env,
@@ -161,7 +210,27 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
     let settled = false;
     let cancelled = false;
     let timedOut = false;
+    let streamBuffer = '';
     let forceKillTimer;
+    const emitProgressLine = (line) => {
+      if (!onProgress || runtime.outputFormat !== 'stream-json' || !line.trim()) return;
+      try {
+        const progress = classifyProgressEvent(JSON.parse(line));
+        if (!progress) return;
+        if (progress.lastToolSummary) progress.lastToolSummary = redactText(progress.lastToolSummary, secrets).slice(0, 256);
+        onProgress({ ...progress, lastActivityAt: new Date().toISOString() });
+      } catch {}
+    };
+    const consumeProgressChunk = (chunk) => {
+      if (!onProgress || runtime.outputFormat !== 'stream-json') return;
+      streamBuffer += chunk;
+      let index;
+      while ((index = streamBuffer.indexOf('\n')) >= 0) {
+        const line = streamBuffer.slice(0, index);
+        streamBuffer = streamBuffer.slice(index + 1);
+        emitProgressLine(line);
+      }
+    };
     const stopChild = (reason) => {
       if (settled) return;
       if (reason === 'cancelled') cancelled = true;
@@ -179,7 +248,10 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
-      try { stdout = appendWithLimit(stdout, chunk, 'stdout'); }
+      try {
+        stdout = appendWithLimit(stdout, chunk, 'stdout');
+        consumeProgressChunk(chunk);
+      }
       catch (error) { terminateProcessTree(child, 'SIGTERM'); reject(error); }
     });
     child.stderr.on('data', (chunk) => {
@@ -199,7 +271,7 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
       abortSignal?.removeEventListener('abort', onAbort);
       if (settled) return;
       settled = true;
-      const secrets = collectSensitiveValues(invocation.env);
+      if (streamBuffer) emitProgressLine(streamBuffer);
       const safeStdout = redactText(stdout, secrets);
       const safeStderr = redactText(stderr, secrets);
       const parsed = parseClaudeOutput(safeStdout, runtime.outputFormat);

@@ -4,7 +4,7 @@ Validation date: 2026-07-15
 
 ## Result
 
-- Node test suites: **26 passed, 0 failed**
+- Node test suites: **30 passed, 0 failed**
 - JavaScript syntax checks: passed
 - JSON manifests and agent registry: parsed successfully
 - MCP initialize / tools/list / dry-run: passed
@@ -14,8 +14,11 @@ Validation date: 2026-07-15
 - Secret isolation: API credential remained in child environment and did not enter CLI arguments
 - Foreground execution creates and finalizes a Job record before returning
 - Compact foreground and background results preserve review evidence without returning raw event streams by default
+- Background workers consume internal `stream-json` events and persist versioned compact progress (`starting` → `inspecting` → `implementing` → `verifying` → `finalizing` → terminal)
+- Default orchestrated polling exposes `progressRevision` and adaptively backs off at 30, 60, 120, and 180 seconds; unchanged polls are marked without duplicate user-facing progress text
+- Explicit `background=false` foreground execution remains a single-result silent-wait path
 - Default compact MCP payload is capped at 8 KB and marks truncation
-- MCP service heartbeat renews background leases; `job_status` is inspection-only
+- MCP service heartbeat renews background leases; `job_status` is inspection-only and does not renew leases
 - JSON objects, JSON event arrays, and line-delimited `stream-json` results are parsed successfully
 - Full stored output remains available through the explicit diagnostic result mode
 - MCP request cancellation terminates the active Claude process group
@@ -24,7 +27,7 @@ Validation date: 2026-07-15
 - MCP service disposal cancels owned non-persistent jobs
 - Explicit persistent jobs survive MCP service disposal and complete normally
 - All eight Agent XML prompts enforce bounded command output and fixed evidence-report sections
-- Orchestrator skill requires foreground delegation, no automatic polling, and an editable next-stage plan
+- Orchestrator skill requires explicit background delegation with adaptive polling, supports explicit silent foreground waiting, and requires an editable next-stage plan
 - Doctor passes and emits a non-blocking compaction recommendation without changing global config
 
 ## Claude CLI compatibility checked against supplied `claude --help`

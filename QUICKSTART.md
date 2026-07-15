@@ -62,11 +62,13 @@ claude -p
 
 ## 4. 默认前台与后台任务
 
-正常委派使用前台模式。MCP 请求会保持挂起，Agent 完成后返回一次紧凑结果；Codex 随后自行检查实际 diff、测试和未完成项，不轮询 `job_status`。
+正常委派显式使用后台模式：`run_agent(background=true)` 立即返回 Job ID，Codex 按返回的 `nextPollSeconds` 自动调用 `job_status`，轮询间隔自适应为 30、60、120、180 秒。状态无变化时静默等待，阶段变化时发送一行更新，终态后只调用一次 `job_result`；状态接口只返回紧凑进度，不返回原始日志或工具输入。
+
+如果用户明确要求“不轮询”“静默等待”或“完成后再告诉我”，使用 `run_agent(background=false)`。MCP 请求保持挂起，Agent 完成后只恢复一次 Codex 回合。
 
 前台任务收到 `notifications/cancelled` 时会终止 Claude 进程组，完整结果保存在本地 Job 文件中，默认不会返回 `structured`、raw stdout 或完整 stderr。
 
-只有用户明确要求后台执行时才使用：
+需要默认进度跟踪时使用：
 
 长任务可让 Codex调用：
 
@@ -74,7 +76,7 @@ claude -p
 按上面的计划启用后端工程师智能体后台执行。
 ```
 
-插件返回 job ID 后，用户可按需使用 `job_status`、`job_result` 和 `job_cancel`。后台租约由 MCP 服务心跳维护，`job_status` 仅用于主动查看；MCP 断开时非持久任务会被取消，Worker 保留租约过期兜底。
+插件返回 job ID 后，Codex 按 `nextPollSeconds` 使用 `job_status`，并在终态调用一次 `job_result`；用户也可使用 `job_cancel`。后台租约由 MCP 服务心跳维护，MCP 断开时非持久任务会被取消，Worker 保留租约过期兜底。
 
 只有明确需要任务脱离 Codex 继续运行时，才要求使用 `persistOnDisconnect=true`。普通任务不要启用持久模式。
 

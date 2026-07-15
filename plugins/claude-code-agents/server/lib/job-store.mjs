@@ -28,7 +28,22 @@ export class JobStore {
     const dir = this.dir(jobId);
     fs.mkdirSync(dir, { recursive: false, mode: 0o700 });
     atomicWrite(path.join(dir, 'request.json'), request);
-    const meta = { jobId, status: 'queued', createdAt: new Date().toISOString(), agent: request.agent, cwd: request.cwd, planSha256: request.planSha256 || null };
+    const meta = {
+      jobId,
+      status: 'queued',
+      createdAt: new Date().toISOString(),
+      agent: request.agent,
+      cwd: request.cwd,
+      planSha256: request.planSha256 || null,
+      progressRevision: 0,
+      phase: 'starting',
+      elapsedMs: 0,
+      turnsObserved: 0,
+      lastActivityAt: null,
+      lastTool: null,
+      lastToolSummary: null,
+      verificationState: 'pending',
+    };
     atomicWrite(path.join(dir, 'meta.json'), meta);
     return meta;
   }
@@ -48,6 +63,20 @@ export class JobStore {
 
   writeResult(jobId, result) {
     atomicWrite(path.join(this.dir(jobId), 'result.json'), result);
+  }
+
+  writeProgress(jobId, patch) {
+    const current = this.readJson(jobId, 'meta.json') || { jobId };
+    const visibleKeys = ['phase', 'turnsObserved', 'lastTool', 'verificationState'];
+    const changed = visibleKeys.some((key) => patch[key] !== undefined && patch[key] !== current[key]);
+    const next = {
+      ...current,
+      ...patch,
+      progressRevision: changed ? Number(current.progressRevision || 0) + 1 : Number(current.progressRevision || 0),
+      updatedAt: new Date().toISOString(),
+    };
+    atomicWrite(path.join(this.dir(jobId), 'meta.json'), next);
+    return next;
   }
 
   renewLease(jobId) {

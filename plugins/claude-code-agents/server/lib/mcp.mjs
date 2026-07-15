@@ -12,7 +12,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'run_agent',
-    description: 'Delegate an approved Codex implementation plan to a selected local Claude Code CLI specialist. A non-empty plan is mandatory.',
+    description: 'Delegate an approved Codex implementation plan to a selected local Claude Code CLI specialist. The orchestration skill normally passes background=true for adaptive progress polling; use background=false for explicit no-poll waiting. A non-empty plan is mandatory.',
     inputSchema: {
       type: 'object',
       required: ['agent', 'task', 'plan'],
@@ -44,11 +44,13 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'job_status',
-    description: 'Show compact Claude Code background job status. Use only for user-requested inspection; the MCP service maintains active leases internally.',
+    description: 'Show compact Claude Code background job progress. Use since_progress_revision and poll_attempt to follow the adaptive 30/60/120/180 second schedule; the MCP service maintains leases internally.',
     inputSchema: {
       type: 'object',
       properties: {
         job_id: { type: 'string' },
+        since_progress_revision: { type: 'integer', minimum: 0, description: 'The progressRevision returned by the previous status response.' },
+        poll_attempt: { type: 'integer', minimum: 0, maximum: 3, default: 0, description: 'The previous poll attempt used to calculate nextPollSeconds.' },
         full: { type: 'boolean', default: false, description: 'Include all stored metadata for diagnostics.' },
         limit: { type: 'integer', minimum: 1, maximum: 20, default: 5 },
       },
@@ -148,7 +150,12 @@ export class McpServer {
             this.activeRequests.delete(id);
           }
         }
-        else if (name === 'job_status') value = this.service.status(args.job_id, { full: args.full, limit: args.limit });
+        else if (name === 'job_status') value = this.service.status(args.job_id, {
+          full: args.full,
+          limit: args.limit,
+          sinceRevision: args.since_progress_revision,
+          pollAttempt: args.poll_attempt,
+        });
         else if (name === 'job_result') value = this.service.result(args.job_id, { full: args.full, maxTextChars: args.max_text_chars });
         else if (name === 'job_cancel') value = this.service.cancel(args.job_id);
         else throw new Error(`Unknown tool: ${name}`);

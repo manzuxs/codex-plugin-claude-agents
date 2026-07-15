@@ -11,11 +11,32 @@ const DEFAULT_RESULT_TEXT_CHARS = 8000;
 const MAX_COMPACT_RESULT_BYTES = 8192;
 const DEFAULT_BACKGROUND_LEASE_MS = 90_000;
 const ACTIVE_JOB_STATUSES = new Set(['starting', 'running', 'queued']);
+const POLL_SCHEDULE_SECONDS = [30, 60, 120, 180];
 
 function compactMeta(meta) {
   if (!meta) return null;
-  const keys = ['jobId', 'status', 'agent', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable'];
-  return Object.fromEntries(keys.filter((key) => meta[key] !== undefined).map((key) => [key, meta[key]]));
+  const keys = ['jobId', 'status', 'agent', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'turnsObserved', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
+  const compact = Object.fromEntries(keys.filter((key) => meta[key] !== undefined).map((key) => [key, meta[key]]));
+  if (ACTIVE_JOB_STATUSES.has(meta.status)) compact.elapsedMs = Math.max(Number(meta.elapsedMs || 0), Date.now() - Date.parse(meta.startedAt || meta.createdAt));
+  else if (meta.elapsedMs !== undefined) compact.elapsedMs = meta.elapsedMs;
+  return compact;
+}
+
+function pollStatus(meta, { sinceRevision, pollAttempt = 0 } = {}) {
+  const currentRevision = Number(meta.progressRevision || 0);
+  const changedSinceLastPoll = sinceRevision === undefined || currentRevision !== Number(sinceRevision);
+  const attempt = Number.isInteger(pollAttempt) && pollAttempt >= 0 ? pollAttempt : 0;
+  if (!ACTIVE_JOB_STATUSES.has(meta.status)) return { changedSinceLastPoll, pollAttempt: attempt, nextPollSeconds: null };
+  const nextAttempt = changedSinceLastPoll ? 1 : Math.min(attempt + 1, POLL_SCHEDULE_SECONDS.length - 1);
+  return {
+    changedSinceLastPoll,
+    pollAttempt: nextAttempt,
+    nextPollSeconds: POLL_SCHEDULE_SECONDS[nextAttempt],
+  };
+}
+
+export function pollSchedule() {
+  return [...POLL_SCHEDULE_SECONDS];
 }
 
 function truncateText(value, maxChars) {
@@ -153,7 +174,7 @@ export class ClaudeAgentService {
       const persistOnDisconnect = Boolean(input.persistOnDisconnect);
       const leaseTimeoutMs = input.leaseTimeoutMs === undefined ? DEFAULT_BACKGROUND_LEASE_MS : Number(input.leaseTimeoutMs);
       if (!Number.isInteger(leaseTimeoutMs) || leaseTimeoutMs < 1000) throw new Error('leaseTimeoutMs must be an integer >= 1000');
-      const meta = this.jobs.create({ ...request, cwd, runtimeOverrides: runtimeOverrides(input), persistOnDisconnect, leaseTimeoutMs });
+      const meta = this.jobs.create({ ...request, cwd, runtimeOverrides: { ...runtimeOverrides(input), outputFormat: 'stream-json' }, persistOnDisconnect, leaseTimeoutMs });
       this.jobs.writeMeta(meta.jobId, {
         status: 'starting',
         persistOnDisconnect,
@@ -184,6 +205,10 @@ export class ClaudeAgentService {
         cwd,
         persistOnDisconnect,
         leaseTimeoutMs,
+        progressRevision: meta.progressRevision || 0,
+        phase: meta.phase || 'starting',
+        nextPollSeconds: POLL_SCHEDULE_SECONDS[0],
+        pollAttempt: 0,
       };
     }
     if (input.dryRun) return await runClaude({ pluginRoot: this.pluginRoot, agent, runtime, request, cwd, signal: input.signal });
@@ -213,10 +238,11 @@ export class ClaudeAgentService {
     return stored;
   }
 
-  status(jobId, { full = false, limit = 5 } = {}) {
+  status(jobId, { full = false, limit = 5, sinceRevision, pollAttempt = 0 } = {}) {
     const value = jobId ? this.jobs.get(jobId) : this.jobs.list(limit);
     if (full) return value;
-    return Array.isArray(value) ? value.map(compactMeta) : compactMeta(value);
+    if (Array.isArray(value)) return value.map((meta) => compactMeta({ ...meta, ...pollStatus(meta, { sinceRevision, pollAttempt }) }));
+    return { ...compactMeta(value), ...pollStatus(value, { sinceRevision, pollAttempt }) };
   }
 
   result(jobId, { full = false, maxTextChars = DEFAULT_RESULT_TEXT_CHARS } = {}) {

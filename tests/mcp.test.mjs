@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const pluginRoot = path.join(root, 'plugins', 'claude-code-agents');
+const pluginRoot = process.env.CLAUDE_AGENTS_TEST_PLUGIN_ROOT || path.join(root, 'plugins', 'claude-code-agents');
 const server = path.join(pluginRoot, 'server', 'index.mjs');
 
 function waitFor(predicate, timeoutMs = 1500) {
@@ -100,6 +100,71 @@ test('MCP server initializes, lists tools, and performs a dry-run delegation', a
   assert.equal(dryRun.agent, 'backend-engineer');
 });
 
+test('background MCP flow exposes progress and adaptive polling hints', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-mcp-progress-'));
+  const dataRoot = path.join(temp, 'data');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, [
+    '#!/usr/bin/env node',
+    "const events = [{ type: 'system', subtype: 'init' }, { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } }] } }, { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'npm test' } }] } }, { type: 'result', subtype: 'success', result: 'background mcp complete', session_id: '66666666-6666-4666-8666-666666666666', num_turns: 2 }];",
+    "let index = 0; const timer = setInterval(() => { if (index >= events.length) { clearInterval(timer); return; } process.stdout.write(JSON.stringify(events[index++]) + '\\n'); }, 50);",
+  ].join('\n'));
+  fs.chmodSync(mock, 0o755);
+  const child = spawn(process.execPath, [server], {
+    cwd: root,
+    env: { ...process.env, CLAUDE_BIN: mock, CLAUDE_AGENTS_DATA_ROOT: dataRoot },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const messages = [];
+  let buffer = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    let i;
+    while ((i = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, i).trim(); buffer = buffer.slice(i + 1);
+      if (line) messages.push(JSON.parse(line));
+    }
+  });
+  const send = (message) => child.stdin.write(JSON.stringify(message) + '\n');
+  send({ jsonrpc: '2.0', id: 30, method: 'tools/call', params: { name: 'run_agent', arguments: {
+    agent: '后端工程师', task: 'Run a background progress check', plan: '1. Inspect. 2. Verify.', cwd: temp, background: true,
+  } } });
+  const started = await waitFor(() => messages.find((message) => message.id === 30), 3000);
+  const initial = JSON.parse(started.result.content[0].text);
+  assert.equal(initial.nextPollSeconds, 30);
+  assert.equal(initial.pollAttempt, 0);
+  assert.equal(initial.progressRevision, 0);
+
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  send({ jsonrpc: '2.0', id: 31, method: 'tools/call', params: { name: 'job_status', arguments: {
+    job_id: initial.jobId, since_progress_revision: initial.progressRevision, poll_attempt: initial.pollAttempt,
+  } } });
+  const progressResponse = await waitFor(() => messages.find((message) => message.id === 31), 3000);
+  const progress = JSON.parse(progressResponse.result.content[0].text);
+  assert.equal(progress.nextPollSeconds, 60);
+  assert.equal(typeof progress.progressRevision, 'number');
+  assert.ok(['starting', 'inspecting', 'verifying', 'completed'].includes(progress.phase));
+  assert.equal(typeof progress.changedSinceLastPoll, 'boolean');
+  assert.equal(typeof progress.verificationState, 'string');
+
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  send({ jsonrpc: '2.0', id: 32, method: 'tools/call', params: { name: 'job_status', arguments: {
+    job_id: initial.jobId, since_progress_revision: progress.progressRevision, poll_attempt: progress.pollAttempt,
+  } } });
+  const terminalResponse = await waitFor(() => messages.find((message) => message.id === 32), 3000);
+  const terminal = JSON.parse(terminalResponse.result.content[0].text);
+  assert.equal(terminal.status, 'completed');
+  assert.equal(terminal.phase, 'completed');
+  assert.equal(terminal.nextPollSeconds, null);
+
+  send({ jsonrpc: '2.0', id: 33, method: 'tools/call', params: { name: 'job_result', arguments: { job_id: initial.jobId } } });
+  const resultResponse = await waitFor(() => messages.find((message) => message.id === 33), 3000);
+  const result = JSON.parse(resultResponse.result.content[0].text);
+  assert.equal(result.result.summary, 'background mcp complete');
+  child.kill('SIGTERM');
+});
+
 test('MCP cancellation notification stops an active run_agent request', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-mcp-cancel-'));
   const startedFile = path.join(temp, 'started');
@@ -175,7 +240,7 @@ test('foreground MCP run returns one compact result and stores full diagnostics 
   });
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 20, method: 'tools/call', params: {
     name: 'run_agent',
-    arguments: { agent: '后端工程师', task: 'Complete a foreground task', plan: '1. Run the mock.', cwd: temp },
+    arguments: { agent: '后端工程师', task: 'Complete a foreground task', plan: '1. Run the mock.', cwd: temp, background: false },
   } }) + '\n');
   const response = await waitFor(() => messages.find((message) => message.id === 20), 3000);
   const result = JSON.parse(response.result.content[0].text);
