@@ -1,3 +1,5 @@
+import { compactResult } from './service.mjs';
+
 const TOOL_DEFINITIONS = [
   {
     name: 'list_agents',
@@ -23,7 +25,7 @@ const TOOL_DEFINITIONS = [
         cwd: { type: 'string', description: 'Target repository. Defaults to the current directory.' },
         background: { type: 'boolean', default: false },
         persistOnDisconnect: { type: 'boolean', default: false, description: 'Allow a background job to continue after the Codex session stops. Use only when explicitly requested.' },
-        leaseTimeoutMs: { type: 'integer', minimum: 30000, maximum: 600000, default: 90000, description: 'Background job lease renewed by job_status.' },
+        leaseTimeoutMs: { type: 'integer', minimum: 30000, maximum: 600000, default: 90000, description: 'Background job lease maintained by the MCP service heartbeat.' },
         dryRun: { type: 'boolean', default: false },
         codexReviewRequired: { type: 'boolean', default: true },
         resume: { type: 'string', description: 'Optional Claude session id or selector to resume.' },
@@ -42,7 +44,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'job_status',
-    description: 'Show compact Claude Code background job status. Poll no more often than the interval returned by run_agent.',
+    description: 'Show compact Claude Code background job status. Use only for user-requested inspection; the MCP service maintains active leases internally.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -61,7 +63,7 @@ const TOOL_DEFINITIONS = [
       properties: {
         job_id: { type: 'string' },
         full: { type: 'boolean', default: false, description: 'Include raw and structured Claude output.' },
-        max_text_chars: { type: 'integer', minimum: 1000, maximum: 50000, default: 12000 },
+        max_text_chars: { type: 'integer', minimum: 1000, maximum: 50000, default: 8000 },
       },
       additionalProperties: false,
     },
@@ -80,7 +82,7 @@ const TOOL_DEFINITIONS = [
 
 function textResult(value, isError = false) {
   return {
-    content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
+    content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) }],
     isError,
   };
 }
@@ -141,6 +143,7 @@ export class McpServer {
           this.activeRequests.set(id, controller);
           try {
             value = await this.service.run({ ...args, cwd: args.cwd || process.cwd(), signal: controller.signal });
+            if (!args.background && !value?.dryRun) value = compactResult(value);
           } finally {
             this.activeRequests.delete(id);
           }
@@ -172,8 +175,8 @@ export class McpServer {
       }
     });
     process.stdin.once('end', () => this.shutdown('mcp_stdin_closed'));
-    process.once('SIGTERM', () => { this.shutdown('mcp_terminated'); process.exit(0); });
-    process.once('SIGINT', () => { this.shutdown('mcp_interrupted'); process.exit(0); });
+    process.once('SIGTERM', () => this.shutdown('mcp_terminated'));
+    process.once('SIGINT', () => this.shutdown('mcp_interrupted'));
     process.stdin.resume();
   }
 
@@ -182,5 +185,11 @@ export class McpServer {
     this.stopped = true;
     for (const controller of this.activeRequests.values()) controller.abort(reason);
     this.service.dispose(reason);
+    const deadline = Date.now() + 5000;
+    const finish = () => {
+      if (this.activeRequests.size === 0 || Date.now() >= deadline) process.exit(0);
+      else setTimeout(finish, 50);
+    };
+    finish();
   }
 }

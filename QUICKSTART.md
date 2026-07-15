@@ -60,7 +60,13 @@ claude -p
 
 每次结果都会包含 `planSha256`。它用于标识本次实际传给插件的计划版本。
 
-## 4. 后台任务
+## 4. 默认前台与后台任务
+
+正常委派使用前台模式。MCP 请求会保持挂起，Agent 完成后返回一次紧凑结果；Codex 随后自行检查实际 diff、测试和未完成项，不轮询 `job_status`。
+
+前台任务收到 `notifications/cancelled` 时会终止 Claude 进程组，完整结果保存在本地 Job 文件中，默认不会返回 `structured`、raw stdout 或完整 stderr。
+
+只有用户明确要求后台执行时才使用：
 
 长任务可让 Codex调用：
 
@@ -68,11 +74,15 @@ claude -p
 按上面的计划启用后端工程师智能体后台执行。
 ```
 
-插件返回 job ID 后，Codex 可使用 `job_status`、`job_result` 和 `job_cancel`。后台任务默认绑定 90 秒租约，`job_status` 会续约；停止 Codex 会话后不再续约，任务会自动终止。
+插件返回 job ID 后，用户可按需使用 `job_status`、`job_result` 和 `job_cancel`。后台租约由 MCP 服务心跳维护，`job_status` 仅用于主动查看；MCP 断开时非持久任务会被取消，Worker 保留租约过期兜底。
 
 只有明确需要任务脱离 Codex 继续运行时，才要求使用 `persistOnDisconnect=true`。普通任务不要启用持久模式。
 
-## 5. 第一次实测建议
+## 5. 阶段续接
+
+阶段结束时，Codex 会在最终回复输出“本阶段结果”和“下一阶段执行计划”。用户可以直接编辑其中的“新任务提示”，然后新建任务粘贴执行；插件不会保存交接包或自动恢复旧任务。
+
+## 6. 第一次实测建议
 
 先用一个小任务验证：
 

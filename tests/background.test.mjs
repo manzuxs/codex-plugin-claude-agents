@@ -39,17 +39,50 @@ process.stdout.write(JSON.stringify({ result: 'background complete', session_id:
       background: true,
     });
     assert.equal(created.ok, true);
-    assert.equal(created.recommendedPollSeconds, 30);
+    assert.equal(created.recommendedPollSeconds, undefined);
     const finished = await waitFor(() => {
       const status = service.status(created.jobId);
       return ['completed', 'failed'].includes(status.status) ? status : null;
     });
     assert.equal(finished.status, 'completed');
     const stored = service.result(created.jobId);
-    assert.equal(stored.result.ok, true);
-    assert.equal(stored.result.text, 'background complete');
+    assert.equal(stored.result.status, 'completed');
+    assert.equal(stored.result.summary, 'background complete');
     assert.equal(stored.result.sessionId, '22222222-2222-4222-8222-222222222222');
     assert.equal(stored.meta.planSha256, stored.result.planSha256);
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_BIN;
+    else process.env.CLAUDE_BIN = previous;
+  }
+});
+
+test('MCP service heartbeat renews a background lease without status polling', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-heartbeat-'));
+  const dataRoot = path.join(temp, 'data');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, ['#!/usr/bin/env node', 'setInterval(() => {}, 1000);'].join('\n'));
+  fs.chmodSync(mock, 0o755);
+
+  const previous = process.env.CLAUDE_BIN;
+  process.env.CLAUDE_BIN = mock;
+  try {
+    const service = new ClaudeAgentService({ pluginRoot, dataRoot });
+    const created = await service.run({
+      agent: '后端工程师',
+      task: 'Keep running while MCP is connected',
+      plan: '1. Wait for the service heartbeat.',
+      cwd: temp,
+      background: true,
+      leaseTimeoutMs: 1000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    assert.ok(['starting', 'running'].includes(service.jobs.get(created.jobId).status));
+    service.dispose('mcp_disconnected');
+    const stopped = await waitFor(() => {
+      const status = service.jobs.get(created.jobId);
+      return status.status === 'cancelled' ? status : null;
+    });
+    assert.equal(stopped.cancellationReason, 'mcp_disconnected');
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_BIN;
     else process.env.CLAUDE_BIN = previous;
@@ -71,7 +104,8 @@ test('background status and result are compact by default with full diagnostics 
   assert.equal(compact.result.raw, undefined);
   assert.equal(compact.result.structured, undefined);
   assert.equal(compact.result.truncated, true);
-  assert.match(compact.result.text, /输出已截断/);
+  assert.match(compact.result.summary, /输出已截断/);
+  assert.ok(Buffer.byteLength(JSON.stringify(compact.result), 'utf8') <= 8192);
 
   const full = service.result(meta.jobId, { full: true });
   assert.equal(full.result.raw, 'raw output');
@@ -83,7 +117,7 @@ test('background status and result are compact by default with full diagnostics 
     structured: [{ type: 'result', result: 'legacy summary', session_id: 'legacy-session', num_turns: 7 }],
   });
   const legacy = service.result(meta.jobId);
-  assert.equal(legacy.result.text, 'legacy summary');
+  assert.equal(legacy.result.summary, 'legacy summary');
   assert.equal(legacy.result.sessionId, 'legacy-session');
   assert.equal(legacy.result.turns, 7);
 });
@@ -109,6 +143,7 @@ setInterval(() => {}, 1000);
       background: true,
       leaseTimeoutMs: 1000,
     });
+    service.stopLeaseHeartbeat(created.jobId);
     assert.equal(created.persistOnDisconnect, false);
     assert.equal(created.leaseTimeoutMs, 1000);
     const finished = await waitFor(() => {
@@ -116,7 +151,7 @@ setInterval(() => {}, 1000);
       return status.status === 'cancelled' ? status : null;
     });
     assert.equal(finished.cancellationReason, 'lease_expired');
-    const stored = service.result(created.jobId);
+    const stored = service.result(created.jobId, { full: true });
     assert.equal(stored.result.cancelled, true);
     assert.equal(stored.result.cancellationReason, 'lease_expired');
   } finally {
@@ -183,7 +218,42 @@ setTimeout(() => process.stdout.write(JSON.stringify({ result: 'persistent compl
       return ['completed', 'failed', 'cancelled'].includes(status.status) ? status : null;
     });
     assert.equal(finished.status, 'completed');
-    assert.equal(service.result(created.jobId).result.text, 'persistent complete');
+    assert.equal(service.result(created.jobId).result.summary, 'persistent complete');
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_BIN;
+    else process.env.CLAUDE_BIN = previous;
+  }
+});
+
+test('foreground execution stores the full result but exposes a compact view', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-foreground-'));
+  const dataRoot = path.join(temp, 'data');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, [
+    '#!/usr/bin/env node',
+    "process.stdout.write(JSON.stringify({ result: 'foreground complete', verificationSummary: 'npm test: passed', session_id: '33333333-3333-4333-8333-333333333333', num_turns: 2, structured: 'kept locally' }));",
+  ].join('\n'));
+  fs.chmodSync(mock, 0o755);
+
+  const previous = process.env.CLAUDE_BIN;
+  process.env.CLAUDE_BIN = mock;
+  try {
+    const service = new ClaudeAgentService({ pluginRoot, dataRoot });
+    const value = await service.run({
+      agent: '后端工程师',
+      task: 'Complete a foreground task',
+      plan: '1. Implement. 2. Test.',
+      cwd: temp,
+    });
+    assert.equal(value.status, 'completed');
+    assert.ok(value.jobId);
+    assert.equal(service.status(value.jobId).status, 'completed');
+    const full = service.result(value.jobId, { full: true });
+    assert.equal(full.result.structured.structured, 'kept locally');
+    const compact = service.result(value.jobId);
+    assert.equal(compact.result.summary, 'foreground complete');
+    assert.equal(compact.result.verificationSummary, 'npm test: passed');
+    assert.equal(compact.result.structured, undefined);
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_BIN;
     else process.env.CLAUDE_BIN = previous;

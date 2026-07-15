@@ -90,6 +90,7 @@ function parseEventOutput(events, fallbackText) {
     costUsd: terminal.total_cost_usd ?? terminal.cost_usd ?? null,
     durationMs: terminal.duration_ms ?? null,
     turns: terminal.num_turns ?? null,
+    verificationSummary: terminal.verificationSummary ?? terminal.verification_summary,
     structured: events,
   };
 }
@@ -113,6 +114,7 @@ export function parseClaudeOutput(stdout, outputFormat) {
       costUsd: parsed.total_cost_usd ?? parsed.cost_usd ?? null,
       durationMs: parsed.duration_ms ?? null,
       turns: parsed.num_turns ?? null,
+      verificationSummary: parsed.verificationSummary ?? parsed.verification_summary,
       structured: parsed,
     };
   } catch {

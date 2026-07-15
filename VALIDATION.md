@@ -1,10 +1,10 @@
 # Validation Report — v0.2.0
 
-Validation date: 2026-07-14
+Validation date: 2026-07-15
 
 ## Result
 
-- Node test suites: **20 passed, 0 failed**
+- Node test suites: **26 passed, 0 failed**
 - JavaScript syntax checks: passed
 - JSON manifests and agent registry: parsed successfully
 - MCP initialize / tools/list / dry-run: passed
@@ -12,14 +12,20 @@ Validation date: 2026-07-14
 - Exact approved-plan preservation through a spawned mock Claude process: passed
 - `planSha256` audit identifier: passed
 - Secret isolation: API credential remained in child environment and did not enter CLI arguments
-- Background job implementation remains available through worker/job store
-- Compact job status and result views preserve review evidence without returning raw event streams by default
+- Foreground execution creates and finalizes a Job record before returning
+- Compact foreground and background results preserve review evidence without returning raw event streams by default
+- Default compact MCP payload is capped at 8 KB and marks truncation
+- MCP service heartbeat renews background leases; `job_status` is inspection-only
 - JSON objects, JSON event arrays, and line-delimited `stream-json` results are parsed successfully
 - Full stored output remains available through the explicit diagnostic result mode
 - MCP request cancellation terminates the active Claude process group
-- Background jobs cancel when their 90-second session lease is not renewed
+- MCP manifest declares `tool_timeout_sec: 2100`
+- Worker fallback cancels background jobs when their session lease expires without an MCP service heartbeat
 - MCP service disposal cancels owned non-persistent jobs
 - Explicit persistent jobs survive MCP service disposal and complete normally
+- All eight Agent XML prompts enforce bounded command output and fixed evidence-report sections
+- Orchestrator skill requires foreground delegation, no automatic polling, and an editable next-stage plan
+- Doctor passes and emits a non-blocking compaction recommendation without changing global config
 
 ## Claude CLI compatibility checked against supplied `claude --help`
 
@@ -58,4 +64,4 @@ A strict mock executable was spawned as a real child process. It rejected unsupp
 
 ## Environment limitation
 
-The validation environment does not provide the user's authenticated real `claude` binary, gateway, or model account. Therefore no paid/live Claude model call is claimed. Run `npm run doctor` and a small real repository task on the target Mac after installation.
+The local environment provides `claude 2.1.145`, and `npm run doctor` passes. A paid/live Claude model call is only claimed after the installed-cache MCP smoke test completes; mock-based tests do not substitute for that check.

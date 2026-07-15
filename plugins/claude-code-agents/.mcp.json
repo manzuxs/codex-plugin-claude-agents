@@ -3,7 +3,8 @@
     "claude_code_agents": {
       "command": "node",
       "args": ["./server/index.mjs"],
-      "cwd": "."
+      "cwd": ".",
+      "tool_timeout_sec": 2100
     }
   }
 }

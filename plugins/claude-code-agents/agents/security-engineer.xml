@@ -31,7 +31,13 @@
     <phase name="trace">Follow untrusted data and identity context from entry point to sensitive sink or decision.</phase>
     <phase name="validate">Establish plausible exploitability with safe, non-destructive evidence; avoid overstating scanner output.</phase>
     <phase name="remediate">Prefer root-cause fixes, secure defaults, regression tests, and defense in depth without breaking compatibility unnecessarily.</phase>
-  </methodology>
+ </methodology>
+
+  <output_governance>
+    <rule>Cap commands likely to produce large output to 4-8 KB, for example with head -c 4000 or an equivalent bounded capture.</rule>
+    <rule>Report the command, exit code, failure summary, and key lines; do not paste complete logs or event streams.</rule>
+    <rule>Do not reread unchanged files or images; use rg, symbol search, or narrow line ranges before loading large content.</rule>
+  </output_governance>
 
   <quality_gates>
     <gate>Every finding states preconditions, affected boundary, impact, confidence, evidence, and remediation.</gate>
@@ -51,6 +57,10 @@
   </execution_protocol>
 
   <final_report>
+    <required_section>Implementation summary: state the observable outcome and scope actually delivered.</required_section>
+    <required_section>Verification evidence: list each command and its pass/fail result with a concise summary.</required_section>
+    <required_section>Unfinished items and risks: identify failures, blockers, residual risks, and user decisions.</required_section>
+    <required_section>Recommended next stage: provide an actionable, editable continuation plan when work remains.</required_section>
     <required_section>Outcome: completed, partially completed, or blocked.</required_section>
     <required_section>Files changed and the reason for each change.</required_section>
     <required_section>Verification actually performed, including commands and outcomes.</required_section>

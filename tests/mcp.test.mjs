@@ -28,6 +28,7 @@ test('plugin MCP manifest launches from its installed root', async () => {
   const config = manifest.mcpServers.claude_code_agents;
   assert.equal(config.cwd, '.');
   assert.deepEqual(config.args, ['./server/index.mjs']);
+  assert.equal(config.tool_timeout_sec, 2100);
 
   const child = spawn(config.command, config.args, {
     cwd: path.resolve(pluginRoot, config.cwd),
@@ -90,6 +91,7 @@ test('MCP server initializes, lists tools, and performs a dry-run delegation', a
   assert.ok(runAgent);
   assert.equal(runAgent.inputSchema.properties.persistOnDisconnect.default, false);
   assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.default, 90000);
+  assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.description.includes('job_status'), false);
   assert.ok(tools.some((tool) => tool.name === 'list_agents'));
   const toolText = messages.find((m) => m.id === 3)?.result?.content?.[0]?.text;
   const dryRun = JSON.parse(toolText);
@@ -142,7 +144,45 @@ setInterval(() => {}, 1000);
   const response = await waitFor(() => messages.find((message) => message.id === 10), 3000);
   child.kill('SIGTERM');
   const result = JSON.parse(response.result.content[0].text);
-  assert.equal(result.ok, false);
-  assert.equal(result.cancelled, true);
-  assert.equal(result.cancellationReason, 'mcp_request_cancelled');
+  assert.equal(result.status, 'cancelled');
+  assert.ok(result.jobId);
+  assert.equal(result.structured, undefined);
+});
+
+test('foreground MCP run returns one compact result and stores full diagnostics locally', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-mcp-foreground-'));
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, [
+    '#!/usr/bin/env node',
+    "process.stdout.write(JSON.stringify({ result: 'x'.repeat(12000), session_id: '44444444-4444-4444-8444-444444444444', num_turns: 4, structured: { raw: 'local-only' } }));",
+  ].join('\n'));
+  fs.chmodSync(mock, 0o755);
+  const child = spawn(process.execPath, [server], {
+    cwd: root,
+    env: { ...process.env, CLAUDE_BIN: mock },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const messages = [];
+  let buffer = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    let i;
+    while ((i = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, i).trim(); buffer = buffer.slice(i + 1);
+      if (line) messages.push(JSON.parse(line));
+    }
+  });
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 20, method: 'tools/call', params: {
+    name: 'run_agent',
+    arguments: { agent: '后端工程师', task: 'Complete a foreground task', plan: '1. Run the mock.', cwd: temp },
+  } }) + '\n');
+  const response = await waitFor(() => messages.find((message) => message.id === 20), 3000);
+  const result = JSON.parse(response.result.content[0].text);
+  child.kill('SIGTERM');
+  assert.equal(result.status, 'completed');
+  assert.equal(result.sessionId, '44444444-4444-4444-8444-444444444444');
+  assert.equal(result.structured, undefined);
+  assert.equal(result.truncated, true);
+  assert.ok(Buffer.byteLength(response.result.content[0].text, 'utf8') <= 8192);
 });

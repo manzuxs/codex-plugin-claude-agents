@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { resolvePluginRoot, resolveDataRoot } from '../server/lib/paths.mjs';
@@ -40,6 +41,16 @@ check('Claude CLI required flags', () => {
   const missing = required.filter((flag) => !help.includes(flag));
   if (missing.length) throw new Error(`Missing flags: ${missing.join(', ')}`);
   return required.join(', ');
+});
+check('Codex compaction guidance', () => {
+  const configPath = path.join(os.homedir(), '.codex', 'config.toml');
+  if (!fs.existsSync(configPath)) return 'No Codex config found; optional target is 100000-120000 tokens.';
+  const config = fs.readFileSync(configPath, 'utf8');
+  const match = config.match(/^\s*model_auto_compact_token_limit\s*=\s*(\d+)\s*$/m);
+  if (!match) return 'model_auto_compact_token_limit is not set; optional target is 100000-120000 tokens.';
+  const value = Number(match[1]);
+  if (value > 120000) return `Configured at ${value}; consider manually lowering it to 100000-120000 tokens.`;
+  return `Configured at ${value}; no compaction warning.`;
 });
 
 console.log(JSON.stringify({ ok: checks.every((item) => item.ok), checks }, null, 2));
