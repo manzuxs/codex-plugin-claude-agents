@@ -26,8 +26,8 @@ test('real child-process delegation preserves the approved Codex plan', async ()
   fs.writeFileSync(mock, `#!/usr/bin/env node
 import fs from 'node:fs';
 const args = process.argv.slice(2);
-const supported = new Set(['--bare','--setting-sources','-p','--output-format','--verbose','--model','--effort','--permission-mode','--agents','--agent','--dangerously-skip-permissions','--name','--max-budget-usd','--resume','--session-id','--allowed-tools','--disallowed-tools']);
-const valueFlags = new Set(['--setting-sources','--output-format','--model','--effort','--permission-mode','--agents','--agent','--name','--max-budget-usd','--resume','--session-id','--allowed-tools','--disallowed-tools']);
+const supported = new Set(['--bare','--setting-sources','-p','--output-format','--verbose','--model','--effort','--permission-mode','--agents','--agent','--dangerously-skip-permissions','--name','--max-budget-usd','--resume','--session-id','--allowed-tools','--disallowed-tools','--chrome','--mcp-config','--strict-mcp-config']);
+const valueFlags = new Set(['--setting-sources','--output-format','--model','--effort','--permission-mode','--agents','--agent','--name','--max-budget-usd','--resume','--session-id','--allowed-tools','--disallowed-tools','--mcp-config']);
 let positional = [];
 for (let i = 0; i < args.length; i++) {
   const token = args[i];
@@ -103,4 +103,107 @@ setInterval(() => {}, 1000);
   assert.equal(result.cancelled, true);
   assert.equal(result.timedOut, false);
   assert.equal(result.cancellationReason, 'mcp_request_cancelled');
+});
+
+test('browser capability preflight blocks before QA work and returns installation guidance', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-browser-preflight-missing-'));
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, [
+    '#!/usr/bin/env node',
+    "process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', tools: ['Bash', 'Read', 'Edit'], mcp_servers: [] }) + '\\n');",
+    'setInterval(() => {}, 1000);',
+  ].join('\n'));
+  fs.chmodSync(mock, 0o755);
+  const registry = loadAgentRegistry(pluginRoot);
+  const agent = resolveAgent(registry, 'qa-engineer');
+  const runtime = resolveAgentRuntime({
+    agent,
+    env: {},
+    overrides: { claudeBin: mock, outputFormat: 'stream-json', permissionMode: 'bypassPermissions' },
+  });
+  const result = await runClaude({
+    pluginRoot,
+    agent,
+    runtime,
+    cwd: temp,
+    request: {
+      task: 'Run Chrome smoke tests',
+      plan: '1. Use Chrome.',
+      browserMode: 'chrome',
+      browserBackend: 'chrome',
+      browserInstallationHint: 'Install Claude in Chrome or configure Playwright MCP.',
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.blocked, true);
+  assert.equal(result.browserCapability, 'missing');
+  assert.equal(result.browserToolUseObserved, false);
+  assert.match(result.error, /claude-in-chrome/);
+  assert.match(result.installationHint, /Playwright MCP/);
+});
+
+test('browser capability preflight accepts loaded MCP and records real browser tool use', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-browser-preflight-ready-'));
+  const mock = path.join(temp, 'claude-mock.mjs');
+  const mcpConfig = path.join(temp, 'browser-mcp.json');
+  fs.writeFileSync(mcpConfig, '{"mcpServers":{"playwright":{"command":"mock"}}}');
+  fs.writeFileSync(mock, [
+    '#!/usr/bin/env node',
+    "const events = [{ type: 'system', subtype: 'init', tools: ['Bash', 'mcp__playwright__browser_navigate'], mcp_servers: [{ name: 'playwright', status: 'connected' }] }, { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__playwright__browser_navigate', input: { url: 'http://localhost' } }] } }, { type: 'result', subtype: 'success', result: 'browser passed', session_id: '77777777-7777-4777-8777-777777777777', num_turns: 1 }];",
+    "for (const event of events) process.stdout.write(JSON.stringify(event) + '\\n');",
+  ].join('\n'));
+  fs.chmodSync(mock, 0o755);
+  const registry = loadAgentRegistry(pluginRoot);
+  const agent = resolveAgent(registry, 'qa-engineer');
+  const runtime = resolveAgentRuntime({
+    agent,
+    env: { QA_ENGINEER_BROWSER_MCP_CONFIGS_JSON: JSON.stringify({ playwright: mcpConfig }) },
+    overrides: { claudeBin: mock, outputFormat: 'stream-json', permissionMode: 'bypassPermissions' },
+  });
+  const result = await runClaude({
+    pluginRoot,
+    agent,
+    runtime,
+    cwd: temp,
+    request: {
+      task: 'Run browser smoke tests',
+      plan: '1. Use Playwright MCP.',
+      browserMode: 'mcp',
+      browserMcpProfile: 'playwright',
+      browserBackend: 'mcp:playwright',
+      browserExpectedMcpServers: ['playwright'],
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.blocked, false);
+  assert.equal(result.browserCapability, 'ready');
+  assert.equal(result.browserToolUseObserved, true);
+  assert.equal(result.text, 'browser passed');
+});
+
+test('repository browser evidence recognizes package-script E2E execution', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-browser-repository-ready-'));
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, [
+    '#!/usr/bin/env node',
+    "const events = [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'npm run test:e2e' } }] } }, { type: 'result', subtype: 'success', result: 'E2E passed' }];",
+    "for (const event of events) process.stdout.write(JSON.stringify(event) + '\\n');",
+  ].join('\n'));
+  fs.chmodSync(mock, 0o755);
+  const registry = loadAgentRegistry(pluginRoot);
+  const agent = resolveAgent(registry, 'qa-engineer');
+  const runtime = resolveAgentRuntime({
+    agent,
+    env: {},
+    overrides: { claudeBin: mock, outputFormat: 'stream-json', permissionMode: 'bypassPermissions' },
+  });
+  const result = await runClaude({
+    pluginRoot,
+    agent,
+    runtime,
+    cwd: temp,
+    request: { task: 'Run E2E', plan: '1. Run E2E.', browserMode: 'repository', browserBackend: 'playwright' },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.browserToolUseObserved, true);
 });

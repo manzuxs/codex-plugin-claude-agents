@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { ClaudeAgentService } from '../plugins/claude-code-agents/server/lib/service.mjs';
+import { spawn } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ClaudeAgentService, compactResult } from '../plugins/claude-code-agents/server/lib/service.mjs';
 import { JobStore } from '../plugins/claude-code-agents/server/lib/job-store.mjs';
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'plugins', 'claude-code-agents');
@@ -110,6 +111,30 @@ test('JobStore increments progressRevision only for visible progress changes', (
   assert.equal(next.progressRevision, 2);
 });
 
+test('JobStore preserves concurrent metadata patches across processes', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-concurrent-store-'));
+  const store = new JobStore(temp);
+  const meta = store.create({ agent: 'backend-engineer', cwd: temp, planSha256: 'concurrent' });
+  const moduleUrl = pathToFileURL(path.join(pluginRoot, 'server', 'lib', 'job-store.mjs')).href;
+  const runWriter = (key) => new Promise((resolve, reject) => {
+    const script = `
+      import { JobStore } from ${JSON.stringify(moduleUrl)};
+      const store = new JobStore(${JSON.stringify(temp)});
+      for (let index = 0; index < 200; index += 1) store.writeMeta(${JSON.stringify(meta.jobId)}, { [${JSON.stringify(key)}]: index });
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('close', (code) => code === 0 ? resolve() : reject(new Error(stderr || `writer exited ${code}`)));
+  });
+  await Promise.all([runWriter('writerA'), runWriter('writerB')]);
+  const stored = store.get(meta.jobId);
+  assert.equal(stored.writerA, 199);
+  assert.equal(stored.writerB, 199);
+});
+
 test('adaptive polling backs off at 60, 120, and 180 seconds', () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-polling-'));
   const service = new ClaudeAgentService({ pluginRoot, dataRoot: path.join(temp, 'data') });
@@ -188,6 +213,59 @@ test('background status and result are compact by default with full diagnostics 
   assert.equal(legacy.result.summary, 'legacy summary');
   assert.equal(legacy.result.sessionId, 'legacy-session');
   assert.equal(legacy.result.turns, 7);
+});
+
+test('compact status and result enforce their byte limits for oversized metadata', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-hard-cap-'));
+  const service = new ClaudeAgentService({ pluginRoot, dataRoot: path.join(temp, 'data') });
+  const meta = service.jobs.create({ agent: 'backend-engineer', cwd: temp, planSha256: 'cap' });
+  service.jobs.writeMeta(meta.jobId, { status: 'failed', error: 'E'.repeat(12_000) });
+  service.jobs.writeResult(meta.jobId, { ok: false, sessionId: 'S'.repeat(9000), error: 'failure' });
+
+  const status = service.status(meta.jobId);
+  const result = service.result(meta.jobId);
+  assert.ok(Buffer.byteLength(JSON.stringify(status), 'utf8') <= 2048);
+  assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') <= 8192);
+
+  for (let index = 0; index < 20; index += 1) {
+    const listed = service.jobs.create({ agent: 'backend-engineer', cwd: temp, planSha256: String(index) });
+    service.jobs.writeMeta(listed.jobId, { status: 'failed', error: 'L'.repeat(4000) });
+  }
+  assert.ok(Buffer.byteLength(JSON.stringify(service.status(undefined, { limit: 20 })), 'utf8') <= 8192);
+});
+
+test('oversized agent reports preserve high-priority evidence instead of slicing one text prefix', () => {
+  const implementation = Array.from({ length: 120 }, (_, index) => `- Implementation detail ${index}: ${'context '.repeat(8)}`).join('\n');
+  const files = Array.from({ length: 50 }, (_, index) => `- src/module-${index}.js: changed behavior ${index}`).join('\n');
+  const verification = [
+    ...Array.from({ length: 140 }, (_, index) => `- check-${index}: passed with complete integration evidence`),
+    '### Type checks',
+    '- npm run typecheck: failed with exit 2 because ContractResult is incompatible',
+  ].join('\n');
+  const risks = Array.from({ length: 40 }, (_, index) => `- Residual risk ${index}: requires follow-up decision`).join('\n');
+  const report = [
+    '## Implementation summary', implementation,
+    '## Files changed', files,
+    '## Verification evidence', verification,
+    '## Unfinished items and risks', risks,
+    '## Recommended next stage', '- Fix the type contract and rerun validation.',
+    '## Outcome', 'partially completed',
+  ].join('\n');
+
+  const compact = compactResult({ ok: false, status: 'failed', agent: 'backend-engineer', jobId: 'claude-evidence', text: report });
+  assert.ok(Buffer.byteLength(JSON.stringify(compact), 'utf8') <= 8192);
+  assert.equal(compact.evidenceStructured, true);
+  assert.match(compact.verificationSummary, /typecheck: failed with exit 2/);
+  assert.match(compact.unfinishedItemsAndRisks, /Residual risk/);
+  assert.match(compact.filesChanged, /src\/module-0\.js/);
+  assert.equal(compact.outcome, 'partially completed');
+  assert.ok(compact.evidenceOmissions.summary > 0);
+  assert.ok(compact.evidenceOmissions.verificationSummary > 0);
+
+  const shortReport = '## Implementation summary\nDone.\n## Verification evidence\n- npm test: passed';
+  const short = compactResult({ ok: true, text: shortReport });
+  assert.equal(short.evidenceStructured, undefined);
+  assert.equal(short.summary, shortReport);
 });
 
 test('background worker cancels when its session lease expires', async () => {

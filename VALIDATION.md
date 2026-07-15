@@ -4,7 +4,7 @@ Validation date: 2026-07-15
 
 ## Result
 
-- Node test suites: **30 passed, 0 failed**
+- Node test suites: **42 passed, 0 failed**
 - JavaScript syntax checks: passed
 - JSON manifests and agent registry: parsed successfully
 - MCP initialize / tools/list / dry-run: passed
@@ -27,6 +27,7 @@ Validation date: 2026-07-15
 - MCP service disposal cancels owned non-persistent jobs
 - Explicit persistent jobs survive MCP service disposal and complete normally
 - All eight Agent XML prompts enforce bounded command output and fixed evidence-report sections
+- UI, frontend, and QA browser modes enforce role-specific visual-validation, implementation-validation, and independent-E2E gates; all modes perform static and `system/init` capability preflight, require observed real-browser use, preserve user permissions, and return role-specific installation guidance instead of silently falling back
 - Orchestrator skill requires explicit background delegation with adaptive polling, supports explicit silent foreground waiting, and requires an editable next-stage plan
 - Doctor passes and emits a non-blocking compaction recommendation without changing global config
 
@@ -46,6 +47,7 @@ Generated invocation uses:
 - optional `--max-budget-usd`
 - optional `--resume` or `--session-id`
 - optional `--allowed-tools` / `--disallowed-tools`
+- optional QA browser flags: `--chrome` or `--mcp-config` with `--strict-mcp-config`
 
 No generated flag was missing from the supplied help output.
 

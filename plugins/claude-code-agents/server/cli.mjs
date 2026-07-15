@@ -47,6 +47,8 @@ try {
     permissionMode: values.permissionMode,
     timeoutMs: values.timeoutMs ? Number(values.timeoutMs) : undefined,
     maxBudgetUsd: values.maxBudgetUsd ? Number(values.maxBudgetUsd) : undefined,
+    browserMode: values.browserMode,
+    browserMcpProfile: values.browserMcpProfile,
     resume: values.resume,
   });
   else if (command === 'status') result = service.status(values.jobId || values._[0], { full: Boolean(values.full), limit: values.limit ? Number(values.limit) : undefined });
@@ -55,7 +57,7 @@ try {
   else {
     console.log(`Usage:
   cli.mjs list [--cwd PATH]
-  cli.mjs run --agent ID --task TEXT|@FILE --plan TEXT|@FILE [--cwd PATH] [--background] [--persist-on-disconnect] [--lease-timeout-ms 90000] [--dry-run]
+  cli.mjs run --agent ID --task TEXT|@FILE --plan TEXT|@FILE [--cwd PATH] [--background] [--browser-mode MODE] [--browser-mcp-profile NAME] [--dry-run]
   cli.mjs status [JOB_ID] [--full] [--limit 5]
   cli.mjs result [JOB_ID] [--full] [--max-text-chars 12000]
   cli.mjs cancel JOB_ID`);

@@ -92,6 +92,11 @@ test('MCP server initializes, lists tools, and performs a dry-run delegation', a
   assert.equal(runAgent.inputSchema.properties.persistOnDisconnect.default, false);
   assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.default, 90000);
   assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.description.includes('job_status'), false);
+  assert.deepEqual(runAgent.inputSchema.properties.browserMode.enum, ['none', 'repository', 'chrome', 'mcp']);
+  assert.equal(runAgent.inputSchema.properties.browserMode.default, 'none');
+  assert.match(runAgent.inputSchema.properties.browserMode.description, /user-configured permission mode/);
+  assert.match(runAgent.inputSchema.properties.browserMode.description, /ui-designer, frontend-engineer, and qa-engineer/);
+  assert.match(runAgent.inputSchema.properties.browserMcpProfile.description, /arbitrary config paths are not accepted/);
   assert.ok(tools.some((tool) => tool.name === 'list_agents'));
   const toolText = messages.find((m) => m.id === 3)?.result?.content?.[0]?.text;
   const dryRun = JSON.parse(toolText);

@@ -99,3 +99,22 @@ claude -p
 ```
 
 这样可以快速验证插件安装、MCP审批、Claude登录、模型配置、权限模式和当前工作目录是否正确。
+
+## 7. 真实浏览器测试
+
+当验收标准要求浏览器冒烟或 E2E 时，启用测试工程师并选择模式：
+
+```json
+{
+  "agent": "qa-engineer",
+  "task": "运行关键用户路径的真实浏览器冒烟测试",
+  "plan": "<已批准计划>",
+  "acceptanceCriteria": "真实浏览器完成登录、核心操作与结果断言，并保存证据",
+  "browserMode": "repository",
+  "cwd": "<项目根目录>"
+}
+```
+
+UI 视觉验收可把 `agent` 改为 `ui-designer`，优先使用 `mcp`/`chrome` 获取真实页面与截图；前端实现自测可使用 `frontend-engineer`，优先运行仓库 `repository` Playwright/Cypress。三者分别执行视觉验收、实现自测和独立 E2E 门禁。
+
+`chrome` 复用 Claude in Chrome（API 网关环境请改用 MCP）；`mcp` 使用对应角色 `.env` 中预配置的 profile，只有一个时可省略 `browserMcpProfile`。浏览器模式沿用用户配置的权限；如需避免非交互审批阻塞，可把对应角色的 `<PREFIX>_PERMISSION_MODE` 配置为 `bypassPermissions`。缺少依赖或工具注入失败时任务返回 `blocked` 和对应安装提示，不会自动安装，也不会静默切换成 Codex 自身浏览器。

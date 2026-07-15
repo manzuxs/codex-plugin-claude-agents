@@ -37,7 +37,18 @@ const TOOL_DEFINITIONS = [
         maxBudgetUsd: { type: 'number', minimum: 0 },
         outputFormat: { type: 'string', enum: ['text', 'json', 'stream-json'] },
         allowedTools: { type: 'array', items: { type: 'string' } },
-        disallowedTools: { type: 'array', items: { type: 'string' } }
+        disallowedTools: { type: 'array', items: { type: 'string' } },
+        browserMode: {
+          type: 'string',
+          enum: ['none', 'repository', 'chrome', 'mcp'],
+          default: 'none',
+          description: 'Real-browser completion gate for ui-designer, frontend-engineer, and qa-engineer using the resolved user-configured permission mode. The server applies role-specific evidence rules, preflights the backend, and returns installation guidance instead of silently falling back.',
+        },
+        browserMcpProfile: {
+          type: 'string',
+          pattern: '^[a-z][a-z0-9-]*$',
+          description: 'Preconfigured profile name for browserMode=mcp. It may be omitted only when exactly one profile is configured; arbitrary config paths are not accepted.',
+        }
       },
       additionalProperties: false,
     },

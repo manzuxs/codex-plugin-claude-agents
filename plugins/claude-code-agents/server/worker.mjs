@@ -34,11 +34,17 @@ try {
   let turnsObserved = 0;
   let lastTool = null;
   let lastToolSummary = null;
+  let browserCapability = null;
+  let browserBackend = null;
+  let installationHint = null;
   reportProgress = (progress = {}, force = false) => {
     if (progress.turnObserved) turnsObserved += 1;
     if (Number.isFinite(progress.turnsObserved)) turnsObserved = Math.max(turnsObserved, progress.turnsObserved);
     if (progress.lastTool) lastTool = progress.lastTool;
     if (progress.lastToolSummary) lastToolSummary = String(progress.lastToolSummary).slice(0, 256);
+    if (progress.browserCapability) browserCapability = String(progress.browserCapability).slice(0, 32);
+    if (progress.browserBackend) browserBackend = String(progress.browserBackend).slice(0, 128);
+    if (progress.installationHint) installationHint = String(progress.installationHint).slice(0, 512);
     const phase = progress.phase || lastPhase;
     const now = Date.now();
     if (!force && phase === lastPhase && now - lastWriteMs < 5000) return;
@@ -49,6 +55,9 @@ try {
       lastActivityAt: progress.lastActivityAt || new Date(now).toISOString(),
       lastTool,
       lastToolSummary,
+      browserCapability,
+      browserBackend,
+      installationHint,
     };
     if (progress.verificationState !== undefined) patch.verificationState = progress.verificationState;
     service.jobs.writeProgress(jobId, patch);
@@ -82,11 +91,14 @@ try {
   const current = service.jobs.get(jobId);
   const cancelled = result.cancelled || current.status === 'cancelled' || Boolean(stopReason);
   const cancellationReason = current.cancellationReason || stopReason || result.cancellationReason;
-  const status = cancelled ? 'cancelled' : (result.ok ? 'completed' : 'failed');
+  const status = cancelled ? 'cancelled' : (result.blocked ? 'blocked' : (result.ok ? 'completed' : 'failed'));
   reportProgress({
     phase: status,
     turnsObserved: result.turns,
     verificationState: cancelled ? 'cancelled' : (result.ok ? 'passed' : 'failed'),
+    browserCapability: result.browserCapability,
+    browserBackend: result.browserBackend,
+    installationHint: result.installationHint,
   }, true);
   service.jobs.writeResult(jobId, { ...result, cancelled, cancellationReason });
   service.jobs.writeMeta(jobId, {
@@ -94,6 +106,7 @@ try {
     finishedAt: new Date().toISOString(),
     exitCode: result.exitCode,
     sessionId: result.sessionId || null,
+    error: result.error,
     cancellationReason,
   });
   process.exitCode = result.ok ? 0 : 1;

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { buildDelegationPrompt } from './xml.mjs';
 import { collectSensitiveValues, redactText } from './redact.mjs';
+import { browserUseObserved, inspectBrowserInit } from './browser.mjs';
 
 const MAX_CAPTURE_BYTES = 20 * 1024 * 1024;
 
@@ -40,6 +41,10 @@ export function buildClaudeInvocation({ pluginRoot, agent, runtime, request }) {
     plan: request.plan,
     acceptanceCriteria: request.acceptanceCriteria,
     context: request.context,
+    browserMode: request.browserMode,
+    browserMcpProfile: request.browserMcpProfile,
+    browserPurpose: request.browserPurpose,
+    browserCompletionGate: request.browserCompletionGate,
     codexReviewRequired: request.codexReviewRequired !== false,
   });
   const args = [
@@ -54,6 +59,14 @@ export function buildClaudeInvocation({ pluginRoot, agent, runtime, request }) {
     '--agents', nativeAgents,
     '--agent', agent.id,
   ];
+  if (request.browserMode === 'chrome') args.push('--chrome');
+  if (request.browserMode === 'mcp') {
+    const configPath = runtime.browserMcpConfigs[request.browserMcpProfile];
+    if (!configPath || !fs.existsSync(configPath) || !fs.statSync(configPath).isFile()) {
+      throw new Error(`Browser MCP config file is unavailable for profile: ${request.browserMcpProfile}`);
+    }
+    args.push('--mcp-config', configPath, '--strict-mcp-config');
+  }
   if (runtime.permissionMode === 'bypassPermissions') args.push('--dangerously-skip-permissions');
   if (request.resume && request.sessionId) throw new Error('resume and sessionId are mutually exclusive');
   if (runtime.maxBudgetUsd > 0) args.push('--max-budget-usd', String(runtime.maxBudgetUsd));
@@ -77,6 +90,8 @@ function redactInvocationArgs(args) {
   const safe = [...args];
   const agentsIndex = safe.indexOf('--agents');
   if (agentsIndex >= 0 && agentsIndex + 1 < safe.length) safe[agentsIndex + 1] = '[NATIVE_AGENT_JSON_REDACTED]';
+  const mcpIndex = safe.indexOf('--mcp-config');
+  if (mcpIndex >= 0 && mcpIndex + 1 < safe.length) safe[mcpIndex + 1] = '[MCP_CONFIG_PATH_REDACTED]';
   if (safe.length > 0) safe[safe.length - 1] = '[DELEGATION_XML_REDACTED_FROM_PREVIEW]';
   return safe;
 }
@@ -89,14 +104,29 @@ function extractToolUse(event) {
   return content.find((block) => block?.type === 'tool_use' || block?.name) || null;
 }
 
-function toolSummary(input) {
-  if (input === undefined || input === null) return '';
-  if (typeof input === 'string') return input.slice(0, 256);
-  if (input.command) return String(input.command).slice(0, 256);
-  for (const key of ['file_path', 'path', 'pattern', 'query']) {
-    if (input[key] !== undefined) return `${key}=${String(input[key])}`.slice(0, 256);
+function commandCategory(command) {
+  const value = String(command || '');
+  if (/(?:^|[\s;&|])(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|(?:npx\s+)?(?:vitest|jest|mocha)\b|pytest\b)/i.test(value)) return 'test';
+  if (/(?:^|[\s;&|])(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:lint|typecheck|check)\b|(?:npx\s+)?(?:eslint|prettier|tsc)\b)/i.test(value)) return 'check';
+  if (/(?:^|[\s;&|])git\s+(?:diff|status|show)\b/i.test(value)) return 'git';
+  if (/(?:^|[\s;&|])(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b|(?:make|cmake|gradle|mvn)\b)/i.test(value)) return 'build';
+  return 'command';
+}
+
+function toolSummary(name, input) {
+  const lower = String(name || '').toLowerCase();
+  if (lower === 'bash' || lower.includes('shell')) {
+    const category = commandCategory(input?.command || input?.cmd);
+    if (category === 'test') return '运行测试';
+    if (category === 'check') return '运行静态检查';
+    if (category === 'git') return '检查 Git 变更';
+    if (category === 'build') return '构建项目';
+    return '执行命令';
   }
-  try { return JSON.stringify(input).slice(0, 256); } catch { return ''; }
+  if (['read', 'ls'].some((value) => lower === value || lower.includes(value))) return '检查文件';
+  if (['glob', 'grep', 'search'].some((value) => lower === value || lower.includes(value))) return '搜索代码';
+  if (['edit', 'write', 'multiedit', 'notebookedit'].some((value) => lower === value || lower.includes(value))) return '修改文件';
+  return '执行工具';
 }
 
 export function classifyProgressEvent(event) {
@@ -114,18 +144,18 @@ export function classifyProgressEvent(event) {
     if (['read', 'glob', 'grep', 'ls', 'search'].some((value) => lower === value || lower.includes(value))) phase = 'inspecting';
     if (lower === 'bash' || lower.includes('shell')) {
       const command = tool.input?.command || tool.input?.cmd || '';
-      phase = /test|lint|typecheck|check|vitest|jest|eslint|prettier|tsc|npm\s+(run\s+)?test/i.test(String(command)) ? 'verifying' : 'implementing';
+      phase = ['test', 'check'].includes(commandCategory(command)) ? 'verifying' : 'implementing';
     }
     if (['edit', 'write', 'multiedit', 'notebookedit'].some((value) => lower === value || lower.includes(value))) phase = 'implementing';
     return {
       phase,
       lastTool: name.slice(0, 64),
-      lastToolSummary: toolSummary(tool.input),
+      lastToolSummary: toolSummary(name, tool.input),
       verificationState: phase === 'verifying' ? 'running' : undefined,
       turnObserved: event.type === 'assistant',
     };
   }
-  if (event.type === 'assistant') return { phase: 'inspecting', turnObserved: true };
+  if (event.type === 'assistant') return { turnObserved: true };
   return null;
 }
 
@@ -191,6 +221,11 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
         outputFormat: runtime.outputFormat,
         gatewayConfigured: Boolean(runtime.gatewayUrl),
         credentialConfigured: Boolean(runtime.apiKey),
+        browserMode: request.browserMode || 'none',
+        browserMcpProfile: request.browserMcpProfile || null,
+        browserBackend: request.browserBackend || null,
+        browserPurpose: request.browserPurpose || null,
+        browserExpectedMcpServers: request.browserExpectedMcpServers || [],
       },
       promptPreview: invocation.prompt.slice(0, 2000),
     };
@@ -212,17 +247,53 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
     let timedOut = false;
     let streamBuffer = '';
     let forceKillTimer;
+    let capabilityFailure = null;
+    let browserInitObserved = request.browserMode === 'repository' || request.browserMode === 'none' || !request.browserMode;
+    let browserCapabilityReady = browserInitObserved;
+    let browserToolUseObserved = false;
+    const stopChild = (reason) => {
+      if (settled) return;
+      if (reason === 'cancelled') cancelled = true;
+      if (reason === 'timeout') timedOut = true;
+      terminateProcessTree(child, 'SIGTERM');
+      if (!forceKillTimer) forceKillTimer = setTimeout(() => terminateProcessTree(child, 'SIGKILL'), 3000).unref();
+    };
     const emitProgressLine = (line) => {
-      if (!onProgress || runtime.outputFormat !== 'stream-json' || !line.trim()) return;
+      if (runtime.outputFormat !== 'stream-json' || !line.trim()) return;
       try {
-        const progress = classifyProgressEvent(JSON.parse(line));
+        const event = JSON.parse(line);
+        const capability = inspectBrowserInit(event, request);
+        if (capability) {
+          browserInitObserved = true;
+          browserCapabilityReady = capability.ok;
+          if (!capability.ok && !capabilityFailure) {
+            capabilityFailure = capability;
+            onProgress?.({
+              phase: 'blocked',
+              verificationState: 'failed',
+              browserCapability: 'missing',
+              browserBackend: request.browserBackend,
+              installationHint: capability.installationHint,
+              lastActivityAt: new Date().toISOString(),
+            });
+            stopChild('capability');
+          }
+        }
+        if (browserUseObserved(event, request)) browserToolUseObserved = true;
+        if (!onProgress) return;
+        const progress = classifyProgressEvent(event);
         if (!progress) return;
         if (progress.lastToolSummary) progress.lastToolSummary = redactText(progress.lastToolSummary, secrets).slice(0, 256);
-        onProgress({ ...progress, lastActivityAt: new Date().toISOString() });
+        onProgress({
+          ...progress,
+          browserCapability: browserCapabilityReady ? 'ready' : undefined,
+          browserBackend: request.browserBackend,
+          lastActivityAt: new Date().toISOString(),
+        });
       } catch {}
     };
     const consumeProgressChunk = (chunk) => {
-      if (!onProgress || runtime.outputFormat !== 'stream-json') return;
+      if (runtime.outputFormat !== 'stream-json') return;
       streamBuffer += chunk;
       let index;
       while ((index = streamBuffer.indexOf('\n')) >= 0) {
@@ -230,13 +301,6 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
         streamBuffer = streamBuffer.slice(index + 1);
         emitProgressLine(line);
       }
-    };
-    const stopChild = (reason) => {
-      if (settled) return;
-      if (reason === 'cancelled') cancelled = true;
-      if (reason === 'timeout') timedOut = true;
-      terminateProcessTree(child, 'SIGTERM');
-      if (!forceKillTimer) forceKillTimer = setTimeout(() => terminateProcessTree(child, 'SIGKILL'), 3000).unref();
     };
     const onAbort = () => stopChild('cancelled');
     if (abortSignal?.aborted) onAbort();
@@ -276,10 +340,23 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
       const safeStderr = redactText(stderr, secrets);
       const parsed = parseClaudeOutput(safeStdout, runtime.outputFormat);
       const finishedAt = new Date().toISOString();
+      if (request.browserMode && request.browserMode !== 'none' && !browserInitObserved && !capabilityFailure) {
+        capabilityFailure = {
+          error: '浏览器能力预检失败：Claude 会话未返回包含工具清单的 system/init 事件。',
+          installationHint: request.browserInstallationHint,
+        };
+      }
+      const executionMissing = request.browserMode && request.browserMode !== 'none'
+        && !capabilityFailure && code === 0 && !browserToolUseObserved;
+      const blocked = Boolean(capabilityFailure || executionMissing);
+      const browserError = capabilityFailure?.error || (executionMissing
+        ? '浏览器能力已加载，但未观察到真实浏览器工具调用或 Playwright/Cypress 执行；请使用同一 QA 会话重试。'
+        : undefined);
       resolve({
-        ok: code === 0 && !cancelled && !timedOut,
+        ok: code === 0 && !cancelled && !timedOut && !blocked,
         cancelled,
         timedOut,
+        blocked,
         cancellationReason: cancelled ? String(abortSignal?.reason || 'cancelled') : undefined,
         agent: agent.id,
         planSha256: request.planSha256 || null,
@@ -290,6 +367,14 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
         signal,
         stderr: safeStderr.trim() || undefined,
         ...parsed,
+        error: browserError,
+        browserCapability: request.browserMode === 'none' || !request.browserMode
+          ? 'not_required'
+          : (capabilityFailure ? 'missing' : 'ready'),
+        browserBackend: request.browserBackend,
+        browserPurpose: request.browserPurpose,
+        browserToolUseObserved,
+        installationHint: capabilityFailure?.installationHint,
       });
     });
   });

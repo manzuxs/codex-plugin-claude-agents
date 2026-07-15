@@ -5,20 +5,106 @@ import { loadAgentRegistry, publicAgentView, resolveAgent, resolveAgentRuntime }
 import { loadLayeredEnv } from './env.mjs';
 import { assertWorkingDirectory } from './paths.mjs';
 import { runClaude } from './claude.mjs';
+import { buildEvidenceView } from './evidence.mjs';
 import { JobStore } from './job-store.mjs';
+import { browserInstallationHint, inspectRepositoryBrowser, readBrowserMcpConfig } from './browser.mjs';
 
 const DEFAULT_RESULT_TEXT_CHARS = 8000;
 const MAX_COMPACT_RESULT_BYTES = 8192;
+const MAX_COMPACT_STATUS_BYTES = 2048;
+const MAX_COMPACT_STATUS_LIST_BYTES = 8192;
 const DEFAULT_BACKGROUND_LEASE_MS = 90_000;
 const ACTIVE_JOB_STATUSES = new Set(['starting', 'running', 'queued']);
 const POLL_SCHEDULE_SECONDS = [30, 60, 120, 180];
+const TRUNCATION_MARKER = '\n[输出已截断]';
+const BROWSER_MODES = new Set(['none', 'repository', 'chrome', 'mcp']);
+const BROWSER_AGENT_POLICIES = Object.freeze({
+  'ui-designer': {
+    purpose: 'visual-validation',
+    completionGate: 'Do not report visual validation completed unless a real browser opened the implemented page at the required viewports, relevant interaction states were reviewed, and screenshot or equivalent reproducible evidence was recorded. Automated assertions are required only when the acceptance criteria request them.',
+  },
+  'frontend-engineer': {
+    purpose: 'implementation-validation',
+    completionGate: 'Do not report browser validation completed unless a real browser exercised the affected user path, checked observable behavior and browser console failures, and recorded reproducible evidence.',
+  },
+  'qa-engineer': {
+    purpose: 'independent-e2e',
+    completionGate: 'Do not report completed unless a real browser exercised the specified user paths, required assertions passed, and reproducible commands, tool actions, and evidence locations were recorded.',
+  },
+});
+
+function jsonBytes(value) {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function fitStringField(value, key, maxBytes) {
+  if (typeof value[key] !== 'string') return;
+  const original = value[key];
+  delete value[key];
+  let low = 0;
+  let high = original.length;
+  let best;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = middle < original.length
+      ? `${original.slice(0, middle)}${TRUNCATION_MARKER}`
+      : original;
+    value[key] = candidate;
+    if (jsonBytes(value) <= maxBytes) {
+      best = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+    delete value[key];
+  }
+  if (best !== undefined) value[key] = best;
+}
+
+function capObject(value, maxBytes, { shrinkKeys, dropKeys, fallback }) {
+  if (jsonBytes(value) <= maxBytes) return value;
+  value.truncated = true;
+  for (const key of shrinkKeys) {
+    if (jsonBytes(value) <= maxBytes) break;
+    fitStringField(value, key, maxBytes);
+  }
+  for (const key of dropKeys) {
+    if (jsonBytes(value) <= maxBytes) break;
+    delete value[key];
+  }
+  return jsonBytes(value) <= maxBytes ? value : fallback(value);
+}
 
 function compactMeta(meta) {
   if (!meta) return null;
-  const keys = ['jobId', 'status', 'agent', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'turnsObserved', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
+  const keys = ['jobId', 'status', 'agent', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'turnsObserved', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'browserCapability', 'browserBackend', 'installationHint', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
   const compact = Object.fromEntries(keys.filter((key) => meta[key] !== undefined).map((key) => [key, meta[key]]));
   if (ACTIVE_JOB_STATUSES.has(meta.status)) compact.elapsedMs = Math.max(Number(meta.elapsedMs || 0), Date.now() - Date.parse(meta.startedAt || meta.createdAt));
   else if (meta.elapsedMs !== undefined) compact.elapsedMs = meta.elapsedMs;
+  return capObject(compact, MAX_COMPACT_STATUS_BYTES, {
+    shrinkKeys: ['error', 'installationHint', 'cancellationReason', 'lastToolSummary', 'sessionId', 'planSha256', 'agent', 'jobId', 'status'],
+    dropKeys: ['leaseExpiresAt', 'updatedAt', 'createdAt', 'startedAt', 'finishedAt', 'lastActivityAt'],
+    fallback: (current) => ({
+      jobId: String(current.jobId || '').slice(0, 128),
+      status: String(current.status || 'unknown').slice(0, 32),
+      agent: String(current.agent || '').slice(0, 64),
+      phase: String(current.phase || '').slice(0, 32),
+      progressRevision: Number(current.progressRevision || 0),
+      elapsedMs: Number(current.elapsedMs || 0),
+      changedSinceLastPoll: Boolean(current.changedSinceLastPoll),
+      pollAttempt: Number(current.pollAttempt || 0),
+      nextPollSeconds: current.nextPollSeconds === null ? null : Number(current.nextPollSeconds || 0),
+      truncated: true,
+    }),
+  });
+}
+
+function capStatusList(values) {
+  const compact = [];
+  for (const value of values) {
+    if (jsonBytes([...compact, value]) > MAX_COMPACT_STATUS_LIST_BYTES) break;
+    compact.push(value);
+  }
   return compact;
 }
 
@@ -48,26 +134,26 @@ function truncateText(value, maxChars) {
 
 function statusForResult(result) {
   if (result.cancelled) return 'cancelled';
+  if (result.blocked) return 'blocked';
   if (result.timedOut) return 'failed';
   return result.ok ? 'completed' : 'failed';
 }
 
-function capCompactResult(compact) {
-  if (Buffer.byteLength(JSON.stringify(compact), 'utf8') <= MAX_COMPACT_RESULT_BYTES) return compact;
-  compact.truncated = true;
-  for (const key of ['verificationSummary', 'summary']) {
-    if (typeof compact[key] !== 'string') continue;
-    let value = compact[key];
-    while (Buffer.byteLength(JSON.stringify(compact), 'utf8') > MAX_COMPACT_RESULT_BYTES && value.length > 0) {
-      const excess = Buffer.byteLength(JSON.stringify(compact), 'utf8') - MAX_COMPACT_RESULT_BYTES;
-      value = `${value.slice(0, Math.max(0, value.length - Math.max(64, excess)))}\n[输出已截断]`;
-      compact[key] = value;
-    }
-  }
-  return compact;
+function capCompactResult(compact, maxBytes = MAX_COMPACT_RESULT_BYTES) {
+  return capObject(compact, maxBytes, {
+    shrinkKeys: ['recommendedNextStage', 'summary', 'filesChanged', 'unfinishedItemsAndRisks', 'verificationSummary', 'installationHint', 'outcome', 'sessionId', 'planSha256', 'jobId', 'agent', 'status'],
+    dropKeys: ['costUsd', 'turns', 'durationMs', 'evidenceOmissions', 'evidenceStructured'],
+    fallback: (current) => ({
+      status: String(current.status || 'unknown').slice(0, 32),
+      agent: String(current.agent || '').slice(0, 64),
+      jobId: String(current.jobId || '').slice(0, 128),
+      truncated: true,
+      summary: '[结果字段超过输出限制；使用 full=true 进行诊断]',
+    }),
+  });
 }
 
-export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS) {
+export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS, maxBytes = MAX_COMPACT_RESULT_BYTES) {
   if (!result) return null;
   const terminal = Array.isArray(result.structured)
     ? [...result.structured].reverse().find((event) => event?.type === 'result')
@@ -82,13 +168,21 @@ export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS) 
     verificationSummary: result.verificationSummary ?? terminal.verificationSummary ?? terminal.verification_summary,
   } : result;
   const compact = {};
-  const keys = ['status', 'agent', 'jobId', 'sessionId', 'planSha256', 'durationMs', 'turns', 'costUsd', 'verificationSummary'];
+  const keys = ['status', 'agent', 'jobId', 'sessionId', 'planSha256', 'durationMs', 'turns', 'costUsd', 'verificationSummary', 'blocked', 'browserCapability', 'browserBackend', 'browserPurpose', 'browserToolUseObserved', 'installationHint'];
   compact.status = source.status || statusForResult(source);
   for (const key of keys) if (source[key] !== undefined) compact[key] = key === 'verificationSummary' ? String(source[key]) : source[key];
   const summary = truncateText(source.summary ?? source.text ?? source.error ?? source.stderr, maxTextChars);
   if (summary.value !== undefined) compact.summary = summary.value;
   if (summary.truncated) compact.truncated = true;
-  return capCompactResult(compact);
+  if (jsonBytes(compact) > maxBytes) {
+    const evidence = buildEvidenceView(source.summary ?? source.text ?? source.error ?? source.stderr, source.verificationSummary);
+    if (evidence) {
+      delete compact.summary;
+      delete compact.verificationSummary;
+      Object.assign(compact, evidence, { truncated: true });
+    }
+  }
+  return capCompactResult(compact, maxBytes);
 }
 
 function runtimeOverrides(input) {
@@ -99,6 +193,67 @@ function runtimeOverrides(input) {
     timeoutMs: input.timeoutMs,
     maxBudgetUsd: input.maxBudgetUsd,
     outputFormat: input.outputFormat,
+  };
+}
+
+function resolveBrowserRequest(input, agent, runtime, cwd) {
+  const browserMode = String(input.browserMode || 'none');
+  let browserMcpProfile = String(input.browserMcpProfile || '');
+  const policy = BROWSER_AGENT_POLICIES[agent.id];
+  const configEnv = `${agent.prefix}_BROWSER_MCP_CONFIGS_JSON`;
+  if (!BROWSER_MODES.has(browserMode)) {
+    throw new Error(`browserMode must be one of: ${[...BROWSER_MODES].join(', ')}; received ${browserMode}`);
+  }
+  if (browserMode !== 'none' && !policy) {
+    throw new Error('Browser modes are only available to ui-designer, frontend-engineer, and qa-engineer');
+  }
+  if (browserMode === 'repository') {
+    const repository = inspectRepositoryBrowser(cwd);
+    if (!repository.ok) throw new Error(repository.error);
+    return {
+      browserMode,
+      browserMcpProfile: '',
+      browserBackend: repository.framework,
+      browserPurpose: policy.purpose,
+      browserCompletionGate: policy.completionGate,
+      browserInstallationHint: browserInstallationHint(browserMode),
+    };
+  }
+  if (browserMode === 'chrome' && runtime.gatewayUrl) {
+    throw new Error(`Chrome browser mode is unavailable with an API gateway. ${browserInstallationHint('chrome', '', configEnv)}`);
+  }
+  if (browserMode === 'mcp') {
+    const profiles = Object.keys(runtime.browserMcpConfigs);
+    if (!browserMcpProfile && profiles.length === 1) [browserMcpProfile] = profiles;
+    if (!browserMcpProfile && profiles.length === 0) {
+      throw new Error(`No browser MCP profile is configured. ${browserInstallationHint('mcp', '', configEnv)}`);
+    }
+    if (!browserMcpProfile) throw new Error('browserMcpProfile is required when multiple browser MCP profiles are configured');
+    if (!runtime.browserMcpConfigs[browserMcpProfile]) {
+      throw new Error(`Unknown browser MCP profile: ${browserMcpProfile}. ${browserInstallationHint('mcp', browserMcpProfile, configEnv)}`);
+    }
+    let expectedServers;
+    try { expectedServers = readBrowserMcpConfig(runtime.browserMcpConfigs[browserMcpProfile]); }
+    catch (error) { throw new Error(`${error.message}. ${browserInstallationHint('mcp', browserMcpProfile, configEnv)}`); }
+    return {
+      browserMode,
+      browserMcpProfile,
+      browserBackend: `mcp:${browserMcpProfile}`,
+      browserPurpose: policy.purpose,
+      browserCompletionGate: policy.completionGate,
+      browserExpectedMcpServers: expectedServers,
+      browserInstallationHint: browserInstallationHint(browserMode, browserMcpProfile, configEnv),
+    };
+  } else if (browserMcpProfile) {
+    throw new Error('browserMcpProfile is only valid when browserMode=mcp');
+  }
+  return {
+    browserMode,
+    browserMcpProfile,
+    browserBackend: browserMode,
+    browserPurpose: browserMode === 'none' ? '' : policy?.purpose || '',
+    browserCompletionGate: browserMode === 'none' ? '' : policy?.completionGate || '',
+    browserInstallationHint: browserMode === 'none' ? '' : browserInstallationHint(browserMode, '', configEnv),
   };
 }
 
@@ -147,7 +302,7 @@ export class ClaudeAgentService {
   async run(input) {
     const agent = resolveAgent(this.registry, input.agent);
     const cwd = assertWorkingDirectory(input.cwd);
-    const runtime = this.runtimeFor(agent, cwd, {
+    let runtime = this.runtimeFor(agent, cwd, {
       model: input.model,
       effort: input.effort,
       permissionMode: input.permissionMode,
@@ -155,6 +310,8 @@ export class ClaudeAgentService {
       maxBudgetUsd: input.maxBudgetUsd,
       outputFormat: input.outputFormat,
     });
+    const browser = resolveBrowserRequest(input, agent, runtime, cwd);
+    if (!input.dryRun && browser.browserMode !== 'none') runtime = { ...runtime, outputFormat: 'stream-json' };
     const plan = String(input.plan || '');
     const request = {
       agent: agent.id,
@@ -168,6 +325,7 @@ export class ClaudeAgentService {
       sessionId: input.sessionId || '',
       allowedTools: input.allowedTools || [],
       disallowedTools: input.disallowedTools || [],
+      ...browser,
       dryRun: Boolean(input.dryRun),
     };
     if (input.background && !input.dryRun) {
@@ -241,8 +399,8 @@ export class ClaudeAgentService {
   status(jobId, { full = false, limit = 5, sinceRevision, pollAttempt = 0 } = {}) {
     const value = jobId ? this.jobs.get(jobId) : this.jobs.list(limit);
     if (full) return value;
-    if (Array.isArray(value)) return value.map((meta) => compactMeta({ ...meta, ...pollStatus(meta, { sinceRevision, pollAttempt }) }));
-    return { ...compactMeta(value), ...pollStatus(value, { sinceRevision, pollAttempt }) };
+    if (Array.isArray(value)) return capStatusList(value.map((meta) => compactMeta({ ...meta, ...pollStatus(meta, { sinceRevision, pollAttempt }) })));
+    return compactMeta({ ...value, ...pollStatus(value, { sinceRevision, pollAttempt }) });
   }
 
   result(jobId, { full = false, maxTextChars = DEFAULT_RESULT_TEXT_CHARS } = {}) {
@@ -253,7 +411,9 @@ export class ClaudeAgentService {
     }
     const stored = this.jobs.result(jobId);
     if (full) return stored;
-    return { meta: compactMeta(stored.meta), result: compactResult({ ...stored.result, jobId: stored.meta.jobId, status: stored.meta.status }, maxTextChars) };
+    const meta = compactMeta(stored.meta);
+    const resultBudget = Math.max(1024, MAX_COMPACT_RESULT_BYTES - jsonBytes({ meta, result: null }) - 32);
+    return { meta, result: compactResult({ ...stored.result, jobId: stored.meta.jobId, status: stored.meta.status }, maxTextChars, resultBudget) };
   }
 
   cancel(jobId, reason = 'user_requested') {
