@@ -220,8 +220,22 @@ codex plugin add claude-code-agents@local-claude-code-agents
 - `maxBudgetUsd`
 - `allowedTools`
 - `disallowedTools`
+- `browserMode`：`none`、`repository`、`chrome` 或 `mcp`，仅限 `qa-engineer`
+- `browserMcpProfile`：`browserMode=mcp` 时选择预配置 profile
 
 `resume` 和 `sessionId` 不能同时传入。
+
+### 浏览器冒烟与 E2E
+
+验收标准要求真实浏览器测试时，Codex 应选择测试工程师并显式设置浏览器模式：
+
+- `repository`：优先运行仓库已有的 Playwright/Cypress；插件不自动安装依赖。
+- `chrome`：向 Claude CLI 添加 `--chrome`，用于必须复用真实 Chrome 会话的测试。
+- `mcp`：通过 `--mcp-config` 和 `--strict-mcp-config` 加载预配置浏览器 MCP。
+
+MCP profile 在 `.env` 中配置，例如 `QA_ENGINEER_BROWSER_MCP_CONFIGS_JSON={"playwright":"/absolute/path/to/playwright-mcp.json"}`。调用方只能传 `browserMcpProfile: "playwright"`，不能传任意配置路径。浏览器模式沿用用户配置的权限，不会强制覆盖；需要避免非交互审批阻塞时，可自行配置 `QA_ENGINEER_PERMISSION_MODE=bypassPermissions`。
+
+启用浏览器模式即表示真实浏览器执行是完成门禁。仅检查代码、生成脚本或运行 API/单元测试不能判定完成；缺少环境、登录态或运行依赖时必须报告 `partially completed` 或 `blocked`。
 
 ## 后台执行
 

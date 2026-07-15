@@ -37,7 +37,7 @@ check('Claude CLI required flags', () => {
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error((result.stderr || `exit ${result.status}`).trim());
   const help = `${result.stdout}\n${result.stderr}`;
-  const required = ['--agents', '--agent', '--effort', '--permission-mode', '--output-format', '--print'];
+  const required = ['--agents', '--agent', '--effort', '--permission-mode', '--output-format', '--print', '--chrome', '--mcp-config', '--strict-mcp-config'];
   const missing = required.filter((flag) => !help.includes(flag));
   if (missing.length) throw new Error(`Missing flags: ${missing.join(', ')}`);
   return required.join(', ');

@@ -37,7 +37,18 @@ const TOOL_DEFINITIONS = [
         maxBudgetUsd: { type: 'number', minimum: 0 },
         outputFormat: { type: 'string', enum: ['text', 'json', 'stream-json'] },
         allowedTools: { type: 'array', items: { type: 'string' } },
-        disallowedTools: { type: 'array', items: { type: 'string' } }
+        disallowedTools: { type: 'array', items: { type: 'string' } },
+        browserMode: {
+          type: 'string',
+          enum: ['none', 'repository', 'chrome', 'mcp'],
+          default: 'none',
+          description: 'QA-only browser test mode using the resolved user-configured permission mode. repository uses project-native Playwright/Cypress; chrome enables Claude in Chrome; mcp loads a preconfigured browser MCP profile.',
+        },
+        browserMcpProfile: {
+          type: 'string',
+          pattern: '^[a-z][a-z0-9-]*$',
+          description: 'Preconfigured profile name required for browserMode=mcp; arbitrary config paths are not accepted.',
+        }
       },
       additionalProperties: false,
     },

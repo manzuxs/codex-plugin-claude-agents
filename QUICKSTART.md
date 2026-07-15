@@ -99,3 +99,20 @@ claude -p
 ```
 
 这样可以快速验证插件安装、MCP审批、Claude登录、模型配置、权限模式和当前工作目录是否正确。
+
+## 7. 真实浏览器测试
+
+当验收标准要求浏览器冒烟或 E2E 时，启用测试工程师并选择模式：
+
+```json
+{
+  "agent": "qa-engineer",
+  "task": "运行关键用户路径的真实浏览器冒烟测试",
+  "plan": "<已批准计划>",
+  "acceptanceCriteria": "真实浏览器完成登录、核心操作与结果断言，并保存证据",
+  "browserMode": "repository",
+  "cwd": "<项目根目录>"
+}
+```
+
+`repository` 使用项目已有 Playwright/Cypress；`chrome` 复用 Claude in Chrome；`mcp` 还需提供 `.env` 中预配置的 `browserMcpProfile`。浏览器模式沿用用户配置的权限；如需避免非交互审批阻塞，可配置 `QA_ENGINEER_PERMISSION_MODE=bypassPermissions`。缺少依赖时仍不会自动安装。

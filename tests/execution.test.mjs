@@ -26,8 +26,8 @@ test('real child-process delegation preserves the approved Codex plan', async ()
   fs.writeFileSync(mock, `#!/usr/bin/env node
 import fs from 'node:fs';
 const args = process.argv.slice(2);
-const supported = new Set(['--bare','--setting-sources','-p','--output-format','--verbose','--model','--effort','--permission-mode','--agents','--agent','--dangerously-skip-permissions','--name','--max-budget-usd','--resume','--session-id','--allowed-tools','--disallowed-tools']);
-const valueFlags = new Set(['--setting-sources','--output-format','--model','--effort','--permission-mode','--agents','--agent','--name','--max-budget-usd','--resume','--session-id','--allowed-tools','--disallowed-tools']);
+const supported = new Set(['--bare','--setting-sources','-p','--output-format','--verbose','--model','--effort','--permission-mode','--agents','--agent','--dangerously-skip-permissions','--name','--max-budget-usd','--resume','--session-id','--allowed-tools','--disallowed-tools','--chrome','--mcp-config','--strict-mcp-config']);
+const valueFlags = new Set(['--setting-sources','--output-format','--model','--effort','--permission-mode','--agents','--agent','--name','--max-budget-usd','--resume','--session-id','--allowed-tools','--disallowed-tools','--mcp-config']);
 let positional = [];
 for (let i = 0; i < args.length; i++) {
   const token = args[i];

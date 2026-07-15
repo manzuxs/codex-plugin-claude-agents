@@ -78,6 +78,16 @@ export function resolveAgentRuntime({ agent, env, overrides = {} }) {
     ...envJsonObject(env, `${p}_EXTRA_ENV_JSON`, {}),
     ...(overrides.extraEnv || {}),
   };
+  const browserMcpConfigs = {
+    ...envJsonObject(env, 'CLAUDE_BROWSER_MCP_CONFIGS_JSON', {}),
+    ...envJsonObject(env, `${p}_BROWSER_MCP_CONFIGS_JSON`, {}),
+  };
+  for (const [profile, configPath] of Object.entries(browserMcpConfigs)) {
+    if (!/^[a-z][a-z0-9-]*$/.test(profile)) throw new Error(`Invalid browser MCP profile: ${profile}`);
+    if (typeof configPath !== 'string' || !path.isAbsolute(configPath)) {
+      throw new Error(`Browser MCP profile ${profile} must reference an absolute config file path`);
+    }
+  }
   return {
     model,
     effort,
@@ -89,6 +99,7 @@ export function resolveAgentRuntime({ agent, env, overrides = {} }) {
     apiKey,
     apiKeyKind,
     extraEnv,
+    browserMcpConfigs,
     claudeBin: String(firstNonEmpty(overrides.claudeBin, env.CLAUDE_BIN, 'claude')),
   };
 }

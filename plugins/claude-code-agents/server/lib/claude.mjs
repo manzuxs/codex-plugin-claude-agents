@@ -40,6 +40,8 @@ export function buildClaudeInvocation({ pluginRoot, agent, runtime, request }) {
     plan: request.plan,
     acceptanceCriteria: request.acceptanceCriteria,
     context: request.context,
+    browserMode: request.browserMode,
+    browserMcpProfile: request.browserMcpProfile,
     codexReviewRequired: request.codexReviewRequired !== false,
   });
   const args = [
@@ -54,6 +56,14 @@ export function buildClaudeInvocation({ pluginRoot, agent, runtime, request }) {
     '--agents', nativeAgents,
     '--agent', agent.id,
   ];
+  if (request.browserMode === 'chrome') args.push('--chrome');
+  if (request.browserMode === 'mcp') {
+    const configPath = runtime.browserMcpConfigs[request.browserMcpProfile];
+    if (!configPath || !fs.existsSync(configPath) || !fs.statSync(configPath).isFile()) {
+      throw new Error(`Browser MCP config file is unavailable for profile: ${request.browserMcpProfile}`);
+    }
+    args.push('--mcp-config', configPath, '--strict-mcp-config');
+  }
   if (runtime.permissionMode === 'bypassPermissions') args.push('--dangerously-skip-permissions');
   if (request.resume && request.sessionId) throw new Error('resume and sessionId are mutually exclusive');
   if (runtime.maxBudgetUsd > 0) args.push('--max-budget-usd', String(runtime.maxBudgetUsd));
@@ -77,6 +87,8 @@ function redactInvocationArgs(args) {
   const safe = [...args];
   const agentsIndex = safe.indexOf('--agents');
   if (agentsIndex >= 0 && agentsIndex + 1 < safe.length) safe[agentsIndex + 1] = '[NATIVE_AGENT_JSON_REDACTED]';
+  const mcpIndex = safe.indexOf('--mcp-config');
+  if (mcpIndex >= 0 && mcpIndex + 1 < safe.length) safe[mcpIndex + 1] = '[MCP_CONFIG_PATH_REDACTED]';
   if (safe.length > 0) safe[safe.length - 1] = '[DELEGATION_XML_REDACTED_FROM_PREVIEW]';
   return safe;
 }
@@ -89,14 +101,29 @@ function extractToolUse(event) {
   return content.find((block) => block?.type === 'tool_use' || block?.name) || null;
 }
 
-function toolSummary(input) {
-  if (input === undefined || input === null) return '';
-  if (typeof input === 'string') return input.slice(0, 256);
-  if (input.command) return String(input.command).slice(0, 256);
-  for (const key of ['file_path', 'path', 'pattern', 'query']) {
-    if (input[key] !== undefined) return `${key}=${String(input[key])}`.slice(0, 256);
+function commandCategory(command) {
+  const value = String(command || '');
+  if (/(?:^|[\s;&|])(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|(?:npx\s+)?(?:vitest|jest|mocha)\b|pytest\b)/i.test(value)) return 'test';
+  if (/(?:^|[\s;&|])(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:lint|typecheck|check)\b|(?:npx\s+)?(?:eslint|prettier|tsc)\b)/i.test(value)) return 'check';
+  if (/(?:^|[\s;&|])git\s+(?:diff|status|show)\b/i.test(value)) return 'git';
+  if (/(?:^|[\s;&|])(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b|(?:make|cmake|gradle|mvn)\b)/i.test(value)) return 'build';
+  return 'command';
+}
+
+function toolSummary(name, input) {
+  const lower = String(name || '').toLowerCase();
+  if (lower === 'bash' || lower.includes('shell')) {
+    const category = commandCategory(input?.command || input?.cmd);
+    if (category === 'test') return '运行测试';
+    if (category === 'check') return '运行静态检查';
+    if (category === 'git') return '检查 Git 变更';
+    if (category === 'build') return '构建项目';
+    return '执行命令';
   }
-  try { return JSON.stringify(input).slice(0, 256); } catch { return ''; }
+  if (['read', 'ls'].some((value) => lower === value || lower.includes(value))) return '检查文件';
+  if (['glob', 'grep', 'search'].some((value) => lower === value || lower.includes(value))) return '搜索代码';
+  if (['edit', 'write', 'multiedit', 'notebookedit'].some((value) => lower === value || lower.includes(value))) return '修改文件';
+  return '执行工具';
 }
 
 export function classifyProgressEvent(event) {
@@ -114,18 +141,18 @@ export function classifyProgressEvent(event) {
     if (['read', 'glob', 'grep', 'ls', 'search'].some((value) => lower === value || lower.includes(value))) phase = 'inspecting';
     if (lower === 'bash' || lower.includes('shell')) {
       const command = tool.input?.command || tool.input?.cmd || '';
-      phase = /test|lint|typecheck|check|vitest|jest|eslint|prettier|tsc|npm\s+(run\s+)?test/i.test(String(command)) ? 'verifying' : 'implementing';
+      phase = ['test', 'check'].includes(commandCategory(command)) ? 'verifying' : 'implementing';
     }
     if (['edit', 'write', 'multiedit', 'notebookedit'].some((value) => lower === value || lower.includes(value))) phase = 'implementing';
     return {
       phase,
       lastTool: name.slice(0, 64),
-      lastToolSummary: toolSummary(tool.input),
+      lastToolSummary: toolSummary(name, tool.input),
       verificationState: phase === 'verifying' ? 'running' : undefined,
       turnObserved: event.type === 'assistant',
     };
   }
-  if (event.type === 'assistant') return { phase: 'inspecting', turnObserved: true };
+  if (event.type === 'assistant') return { turnObserved: true };
   return null;
 }
 
@@ -191,6 +218,8 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
         outputFormat: runtime.outputFormat,
         gatewayConfigured: Boolean(runtime.gatewayUrl),
         credentialConfigured: Boolean(runtime.apiKey),
+        browserMode: request.browserMode || 'none',
+        browserMcpProfile: request.browserMcpProfile || null,
       },
       promptPreview: invocation.prompt.slice(0, 2000),
     };

@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadAgentRegistry, resolveAgent, resolveAgentRuntime } from '../plugins/claude-code-agents/server/lib/agents.mjs';
-import { buildClaudeInvocation, parseClaudeOutput } from '../plugins/claude-code-agents/server/lib/claude.mjs';
+import { buildClaudeInvocation, classifyProgressEvent, parseClaudeOutput } from '../plugins/claude-code-agents/server/lib/claude.mjs';
+import { ClaudeAgentService } from '../plugins/claude-code-agents/server/lib/service.mjs';
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'plugins', 'claude-code-agents');
 
@@ -55,6 +57,53 @@ test('tool lists are comma joined and terminated before the positional prompt', 
   assert.equal(valueAfter(invocation.args, '--disallowed-tools'), 'WebFetch');
   assert.ok(invocation.args.indexOf('--name') > invocation.args.indexOf('--disallowed-tools'));
   assert.match(invocation.args.at(-1), /<codex_plan>y<\/codex_plan>/);
+});
+
+test('QA browser modes build repository, Chrome, and strict preconfigured MCP invocations', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-browser-mode-'));
+  const mcpConfig = path.join(temp, 'playwright-mcp.json');
+  fs.writeFileSync(mcpConfig, '{}');
+  const registry = loadAgentRegistry(pluginRoot);
+  const agent = resolveAgent(registry, 'qa-engineer');
+  const runtime = resolveAgentRuntime({
+    agent,
+    env: { QA_ENGINEER_PERMISSION_MODE: 'auto', QA_ENGINEER_BROWSER_MCP_CONFIGS_JSON: JSON.stringify({ playwright: mcpConfig }) },
+  });
+  const baseRequest = { task: 'Run browser smoke tests', plan: '1. Run the required browser path.' };
+
+  const repository = buildClaudeInvocation({ pluginRoot, agent, runtime, request: { ...baseRequest, browserMode: 'repository' } });
+  assert.equal(repository.args.includes('--chrome'), false);
+  assert.equal(repository.args.includes('--mcp-config'), false);
+  assert.match(repository.prompt, /browser_testing required="true" mode="repository"/);
+
+  const chrome = buildClaudeInvocation({ pluginRoot, agent, runtime, request: { ...baseRequest, browserMode: 'chrome' } });
+  assert.equal(chrome.args.includes('--chrome'), true);
+
+  const mcp = buildClaudeInvocation({
+    pluginRoot,
+    agent,
+    runtime,
+    request: { ...baseRequest, browserMode: 'mcp', browserMcpProfile: 'playwright' },
+  });
+  assert.equal(valueAfter(mcp.args, '--mcp-config'), mcpConfig);
+  assert.equal(mcp.args.includes('--strict-mcp-config'), true);
+  assert.match(mcp.prompt, /mcp_profile="playwright"/);
+});
+
+test('service restricts browser modes to QA and configured MCP profiles while preserving permission configuration', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-browser-guard-'));
+  const service = new ClaudeAgentService({ pluginRoot, dataRoot: path.join(temp, 'data') });
+  const base = { task: 'Browser smoke', plan: '1. Run browser smoke.', cwd: temp, dryRun: true };
+
+  await assert.rejects(service.run({ ...base, agent: 'backend-engineer', permissionMode: 'auto', browserMode: 'repository' }), /only available to qa-engineer/);
+  await assert.rejects(service.run({ ...base, agent: 'qa-engineer', permissionMode: 'auto', browserMode: 'mcp', browserMcpProfile: 'missing' }), /Unknown browser MCP profile/);
+  const automatic = await service.run({ ...base, agent: 'qa-engineer', permissionMode: 'auto', browserMode: 'repository' });
+  assert.equal(automatic.runtime.permissionMode, 'auto');
+  assert.equal(automatic.args.includes('--dangerously-skip-permissions'), false);
+  const bypass = await service.run({ ...base, agent: 'qa-engineer', permissionMode: 'bypassPermissions', browserMode: 'repository' });
+  assert.equal(bypass.runtime.browserMode, 'repository');
+  assert.equal(bypass.runtime.permissionMode, 'bypassPermissions');
+  assert.equal(bypass.args.includes('--dangerously-skip-permissions'), true);
 });
 
 test('credentials stay in child environment, not CLI arguments', () => {
@@ -116,4 +165,27 @@ test('stream-json output returns only the terminal result summary', () => {
   assert.equal(parsed.text, 'done');
   assert.equal(parsed.sessionId, 'session-2');
   assert.equal(parsed.structured.length, 2);
+});
+
+test('progress events expose semantic summaries without raw tool input or phase regression', () => {
+  const read = classifyProgressEvent({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/secret/project/token.txt' } }] },
+  });
+  const command = classifyProgressEvent({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'curl -H "Authorization: Bearer secret-token" https://example.test' } }] },
+  });
+  const verification = classifyProgressEvent({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'npm test' } }] },
+  });
+  const textOnly = classifyProgressEvent({ type: 'assistant', message: { content: [{ type: 'text', text: 'Tests completed.' }] } });
+
+  assert.equal(read.lastToolSummary, '检查文件');
+  assert.equal(command.lastToolSummary, '执行命令');
+  assert.equal(command.lastToolSummary.includes('secret-token'), false);
+  assert.equal(verification.phase, 'verifying');
+  assert.equal(verification.lastToolSummary, '运行测试');
+  assert.deepEqual(textOnly, { turnObserved: true });
 });

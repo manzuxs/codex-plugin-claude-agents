@@ -5,13 +5,60 @@ import { loadAgentRegistry, publicAgentView, resolveAgent, resolveAgentRuntime }
 import { loadLayeredEnv } from './env.mjs';
 import { assertWorkingDirectory } from './paths.mjs';
 import { runClaude } from './claude.mjs';
+import { buildEvidenceView } from './evidence.mjs';
 import { JobStore } from './job-store.mjs';
 
 const DEFAULT_RESULT_TEXT_CHARS = 8000;
 const MAX_COMPACT_RESULT_BYTES = 8192;
+const MAX_COMPACT_STATUS_BYTES = 2048;
+const MAX_COMPACT_STATUS_LIST_BYTES = 8192;
 const DEFAULT_BACKGROUND_LEASE_MS = 90_000;
 const ACTIVE_JOB_STATUSES = new Set(['starting', 'running', 'queued']);
 const POLL_SCHEDULE_SECONDS = [30, 60, 120, 180];
+const TRUNCATION_MARKER = '\n[输出已截断]';
+const BROWSER_MODES = new Set(['none', 'repository', 'chrome', 'mcp']);
+
+function jsonBytes(value) {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function fitStringField(value, key, maxBytes) {
+  if (typeof value[key] !== 'string') return;
+  const original = value[key];
+  delete value[key];
+  let low = 0;
+  let high = original.length;
+  let best;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = middle < original.length
+      ? `${original.slice(0, middle)}${TRUNCATION_MARKER}`
+      : original;
+    value[key] = candidate;
+    if (jsonBytes(value) <= maxBytes) {
+      best = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+    delete value[key];
+  }
+  if (best !== undefined) value[key] = best;
+}
+
+function capObject(value, maxBytes, { shrinkKeys, dropKeys, fallback }) {
+  if (jsonBytes(value) <= maxBytes) return value;
+  value.truncated = true;
+  for (const key of shrinkKeys) {
+    if (jsonBytes(value) <= maxBytes) break;
+    fitStringField(value, key, maxBytes);
+  }
+  for (const key of dropKeys) {
+    if (jsonBytes(value) <= maxBytes) break;
+    delete value[key];
+  }
+  return jsonBytes(value) <= maxBytes ? value : fallback(value);
+}
 
 function compactMeta(meta) {
   if (!meta) return null;
@@ -19,6 +66,30 @@ function compactMeta(meta) {
   const compact = Object.fromEntries(keys.filter((key) => meta[key] !== undefined).map((key) => [key, meta[key]]));
   if (ACTIVE_JOB_STATUSES.has(meta.status)) compact.elapsedMs = Math.max(Number(meta.elapsedMs || 0), Date.now() - Date.parse(meta.startedAt || meta.createdAt));
   else if (meta.elapsedMs !== undefined) compact.elapsedMs = meta.elapsedMs;
+  return capObject(compact, MAX_COMPACT_STATUS_BYTES, {
+    shrinkKeys: ['error', 'cancellationReason', 'lastToolSummary', 'sessionId', 'planSha256', 'agent', 'jobId', 'status'],
+    dropKeys: ['leaseExpiresAt', 'updatedAt', 'createdAt', 'startedAt', 'finishedAt', 'lastActivityAt'],
+    fallback: (current) => ({
+      jobId: String(current.jobId || '').slice(0, 128),
+      status: String(current.status || 'unknown').slice(0, 32),
+      agent: String(current.agent || '').slice(0, 64),
+      phase: String(current.phase || '').slice(0, 32),
+      progressRevision: Number(current.progressRevision || 0),
+      elapsedMs: Number(current.elapsedMs || 0),
+      changedSinceLastPoll: Boolean(current.changedSinceLastPoll),
+      pollAttempt: Number(current.pollAttempt || 0),
+      nextPollSeconds: current.nextPollSeconds === null ? null : Number(current.nextPollSeconds || 0),
+      truncated: true,
+    }),
+  });
+}
+
+function capStatusList(values) {
+  const compact = [];
+  for (const value of values) {
+    if (jsonBytes([...compact, value]) > MAX_COMPACT_STATUS_LIST_BYTES) break;
+    compact.push(value);
+  }
   return compact;
 }
 
@@ -52,22 +123,21 @@ function statusForResult(result) {
   return result.ok ? 'completed' : 'failed';
 }
 
-function capCompactResult(compact) {
-  if (Buffer.byteLength(JSON.stringify(compact), 'utf8') <= MAX_COMPACT_RESULT_BYTES) return compact;
-  compact.truncated = true;
-  for (const key of ['verificationSummary', 'summary']) {
-    if (typeof compact[key] !== 'string') continue;
-    let value = compact[key];
-    while (Buffer.byteLength(JSON.stringify(compact), 'utf8') > MAX_COMPACT_RESULT_BYTES && value.length > 0) {
-      const excess = Buffer.byteLength(JSON.stringify(compact), 'utf8') - MAX_COMPACT_RESULT_BYTES;
-      value = `${value.slice(0, Math.max(0, value.length - Math.max(64, excess)))}\n[输出已截断]`;
-      compact[key] = value;
-    }
-  }
-  return compact;
+function capCompactResult(compact, maxBytes = MAX_COMPACT_RESULT_BYTES) {
+  return capObject(compact, maxBytes, {
+    shrinkKeys: ['recommendedNextStage', 'summary', 'filesChanged', 'unfinishedItemsAndRisks', 'verificationSummary', 'outcome', 'sessionId', 'planSha256', 'jobId', 'agent', 'status'],
+    dropKeys: ['costUsd', 'turns', 'durationMs', 'evidenceOmissions', 'evidenceStructured'],
+    fallback: (current) => ({
+      status: String(current.status || 'unknown').slice(0, 32),
+      agent: String(current.agent || '').slice(0, 64),
+      jobId: String(current.jobId || '').slice(0, 128),
+      truncated: true,
+      summary: '[结果字段超过输出限制；使用 full=true 进行诊断]',
+    }),
+  });
 }
 
-export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS) {
+export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS, maxBytes = MAX_COMPACT_RESULT_BYTES) {
   if (!result) return null;
   const terminal = Array.isArray(result.structured)
     ? [...result.structured].reverse().find((event) => event?.type === 'result')
@@ -88,7 +158,15 @@ export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS) 
   const summary = truncateText(source.summary ?? source.text ?? source.error ?? source.stderr, maxTextChars);
   if (summary.value !== undefined) compact.summary = summary.value;
   if (summary.truncated) compact.truncated = true;
-  return capCompactResult(compact);
+  if (jsonBytes(compact) > maxBytes) {
+    const evidence = buildEvidenceView(source.summary ?? source.text ?? source.error ?? source.stderr, source.verificationSummary);
+    if (evidence) {
+      delete compact.summary;
+      delete compact.verificationSummary;
+      Object.assign(compact, evidence, { truncated: true });
+    }
+  }
+  return capCompactResult(compact, maxBytes);
 }
 
 function runtimeOverrides(input) {
@@ -100,6 +178,26 @@ function runtimeOverrides(input) {
     maxBudgetUsd: input.maxBudgetUsd,
     outputFormat: input.outputFormat,
   };
+}
+
+function resolveBrowserRequest(input, agent, runtime) {
+  const browserMode = String(input.browserMode || 'none');
+  const browserMcpProfile = String(input.browserMcpProfile || '');
+  if (!BROWSER_MODES.has(browserMode)) {
+    throw new Error(`browserMode must be one of: ${[...BROWSER_MODES].join(', ')}; received ${browserMode}`);
+  }
+  if (browserMode !== 'none' && agent.id !== 'qa-engineer') {
+    throw new Error('Browser test modes are only available to qa-engineer');
+  }
+  if (browserMode === 'mcp') {
+    if (!browserMcpProfile) throw new Error('browserMcpProfile is required when browserMode=mcp');
+    if (!runtime.browserMcpConfigs[browserMcpProfile]) {
+      throw new Error(`Unknown browser MCP profile: ${browserMcpProfile}`);
+    }
+  } else if (browserMcpProfile) {
+    throw new Error('browserMcpProfile is only valid when browserMode=mcp');
+  }
+  return { browserMode, browserMcpProfile };
 }
 
 export class ClaudeAgentService {
@@ -155,6 +253,7 @@ export class ClaudeAgentService {
       maxBudgetUsd: input.maxBudgetUsd,
       outputFormat: input.outputFormat,
     });
+    const browser = resolveBrowserRequest(input, agent, runtime);
     const plan = String(input.plan || '');
     const request = {
       agent: agent.id,
@@ -168,6 +267,7 @@ export class ClaudeAgentService {
       sessionId: input.sessionId || '',
       allowedTools: input.allowedTools || [],
       disallowedTools: input.disallowedTools || [],
+      ...browser,
       dryRun: Boolean(input.dryRun),
     };
     if (input.background && !input.dryRun) {
@@ -241,8 +341,8 @@ export class ClaudeAgentService {
   status(jobId, { full = false, limit = 5, sinceRevision, pollAttempt = 0 } = {}) {
     const value = jobId ? this.jobs.get(jobId) : this.jobs.list(limit);
     if (full) return value;
-    if (Array.isArray(value)) return value.map((meta) => compactMeta({ ...meta, ...pollStatus(meta, { sinceRevision, pollAttempt }) }));
-    return { ...compactMeta(value), ...pollStatus(value, { sinceRevision, pollAttempt }) };
+    if (Array.isArray(value)) return capStatusList(value.map((meta) => compactMeta({ ...meta, ...pollStatus(meta, { sinceRevision, pollAttempt }) })));
+    return compactMeta({ ...value, ...pollStatus(value, { sinceRevision, pollAttempt }) });
   }
 
   result(jobId, { full = false, maxTextChars = DEFAULT_RESULT_TEXT_CHARS } = {}) {
@@ -253,7 +353,9 @@ export class ClaudeAgentService {
     }
     const stored = this.jobs.result(jobId);
     if (full) return stored;
-    return { meta: compactMeta(stored.meta), result: compactResult({ ...stored.result, jobId: stored.meta.jobId, status: stored.meta.status }, maxTextChars) };
+    const meta = compactMeta(stored.meta);
+    const resultBudget = Math.max(1024, MAX_COMPACT_RESULT_BYTES - jsonBytes({ meta, result: null }) - 32);
+    return { meta, result: compactResult({ ...stored.result, jobId: stored.meta.jobId, status: stored.meta.status }, maxTextChars, resultBudget) };
   }
 
   cancel(jobId, reason = 'user_requested') {
