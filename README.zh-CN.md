@@ -12,6 +12,8 @@
 - 内置 8 个软件交付角色，每个角色拥有独立提示词和质量门禁。
 - 支持按智能体配置模型、思考强度、权限、超时、预算、API 网关和凭据。
 - 支持前台执行、后台任务、取消、结果持久化和会话恢复。
+- 提供本地可视化指挥中心：智能体配置、Codex 插件安装、任务发起和流式会话监控均可在浏览器完成。
+- 配置、任务元数据、结果和脱敏事件流统一存储在 SQLite（WAL）数据库中。
 - UI、前端和 QA 智能体支持真实浏览器验证。
 - 支持仓库原生 Playwright/Cypress、Claude in Chrome 和浏览器 MCP。
 - 提供浏览器能力预检、证据门禁和可执行的安装提示。
@@ -33,7 +35,7 @@
 
 ## 环境要求
 
-- Node.js 18.18 或更高版本。
+- Node.js 22.5 或更高版本。
 - 本机可以执行 `claude` 命令。
 - 已登录 Claude Code，或已配置兼容的 API 网关和凭据。
 - Codex 客户端支持本地插件和 stdio MCP Server。
@@ -142,6 +144,18 @@ CLAUDE_DEFAULT_API_KEY_KIND=auth_token
 凭据只注入 Claude 子进程环境，不会进入 CLI 参数、委派 XML、MCP 返回值或持久化的后台任务请求。
 
 ## 使用方式
+
+### 可视化指挥中心
+
+在仓库根目录启动本地控制台：
+
+```bash
+npm run dashboard
+```
+
+页面会自动检测 Codex 插件是否已安装。未安装时，点击“开始安装”即可注册本地 marketplace 并安装 `claude-code-agents`；完成后重启 Codex，新建任务即可加载插件。安装后的 Codex 会话也可以直接调用 `open_dashboard` 工具唤起页面。
+
+控制台中的“配置中心”把智能体运行配置写入 `~/.codex/claude-code-agents/claude-agents.sqlite`，凭据只显示“已配置”状态，绝不返回明文。当前版本要求 Node.js 22.5 或更高版本，以使用原生 `node:sqlite`；数据库启用 WAL，MCP 主进程、后台 worker 与浏览器控制台可以并发访问。
 
 先让 Codex 阅读仓库并生成具体计划：
 

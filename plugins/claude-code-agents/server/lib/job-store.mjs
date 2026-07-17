@@ -2,72 +2,86 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const LOCK_WAIT_MS = 10;
-const LOCK_TIMEOUT_MS = 5000;
-const STALE_LOCK_MS = 30_000;
-const lockSignal = new Int32Array(new SharedArrayBuffer(4));
-
-function atomicWrite(filePath, value) {
-  const temp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
-  fs.renameSync(temp, filePath);
+let DatabaseSync;
+try {
+  process.removeAllListeners('warning');
+  ({ DatabaseSync } = await import('node:sqlite'));
+} catch {
+  throw new Error('SQLite storage requires Node.js 22.5 or newer (node:sqlite).');
 }
 
-function withFileLock(filePath, callback) {
-  const lockPath = `${filePath}.lock`;
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  while (true) {
-    try {
-      fs.mkdirSync(lockPath, { mode: 0o700 });
-      break;
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      try {
-        if (Date.now() - fs.statSync(lockPath).mtimeMs > STALE_LOCK_MS) {
-          fs.rmSync(lockPath, { recursive: true, force: true });
-          continue;
-        }
-      } catch (statError) {
-        if (statError.code === 'ENOENT') continue;
-        throw statError;
-      }
-      if (Date.now() >= deadline) throw new Error(`Timed out locking ${path.basename(filePath)}`);
-      Atomics.wait(lockSignal, 0, 0, LOCK_WAIT_MS);
-    }
-  }
-  try {
-    return callback();
-  } finally {
-    fs.rmSync(lockPath, { recursive: true, force: true });
-  }
+const ACTIVE_STATUSES = new Set(['queued', 'starting', 'running']);
+
+function parseJson(value, fallback = null) {
+  if (value === null || value === undefined || value === '') return fallback;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function toMeta(row) {
+  if (!row) return null;
+  const meta = parseJson(row.meta_json, {});
+  return { ...meta, resultAvailable: row.result_json !== null && row.result_json !== undefined };
 }
 
 export class JobStore {
   constructor(dataRoot) {
-    this.root = path.join(dataRoot, 'jobs');
-    fs.mkdirSync(this.root, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
+    this.root = dataRoot;
+    this.filePath = path.join(dataRoot, 'claude-agents.sqlite');
+    this.db = new DatabaseSync(this.filePath);
+    fs.chmodSync(this.filePath, 0o600);
+    this.db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA busy_timeout = 5000;
+      CREATE TABLE IF NOT EXISTS jobs (
+        job_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        agent TEXT NOT NULL,
+        cwd TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        request_json TEXT NOT NULL,
+        meta_json TEXT NOT NULL,
+        result_json TEXT
+      );
+      CREATE TABLE IF NOT EXISTS job_events (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        event_json TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS job_events_job_seq ON job_events(job_id, seq);
+      CREATE INDEX IF NOT EXISTS jobs_created_at ON jobs(created_at DESC);
+    `);
+    this.statements = {
+      insertJob: this.db.prepare('INSERT INTO jobs(job_id,status,agent,cwd,created_at,updated_at,request_json,meta_json) VALUES(?,?,?,?,?,?,?,?)'),
+      getJob: this.db.prepare('SELECT * FROM jobs WHERE job_id = ?'),
+      updateJob: this.db.prepare('UPDATE jobs SET status = ?, updated_at = ?, meta_json = ? WHERE job_id = ?'),
+      writeResult: this.db.prepare('UPDATE jobs SET result_json = ?, updated_at = ? WHERE job_id = ?'),
+      insertEvent: this.db.prepare('INSERT INTO job_events(job_id,created_at,event_json) VALUES(?,?,?)'),
+      readEvents: this.db.prepare('SELECT seq,event_json FROM job_events WHERE job_id = ? AND seq > ? ORDER BY seq LIMIT ?'),
+      listJobs: this.db.prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?'),
+      deleteEvents: this.db.prepare('DELETE FROM job_events WHERE job_id = ?'),
+      deleteJob: this.db.prepare('DELETE FROM jobs WHERE job_id = ?'),
+    };
   }
 
   newId() {
     return `claude-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${crypto.randomBytes(4).toString('hex')}`;
   }
 
-  dir(jobId) {
-    if (!/^claude-[a-zA-Z0-9-]+$/.test(jobId)) throw new Error(`Invalid job id: ${jobId}`);
-    return path.join(this.root, jobId);
-  }
-
   create(request) {
     const jobId = this.newId();
-    const dir = this.dir(jobId);
-    fs.mkdirSync(dir, { recursive: false, mode: 0o700 });
-    atomicWrite(path.join(dir, 'request.json'), request);
+    const now = new Date().toISOString();
     const meta = {
       jobId,
       status: 'queued',
-      createdAt: new Date().toISOString(),
+      createdAt: now,
       agent: request.agent,
+      task: request.task || '',
       cwd: request.cwd,
+      browserMode: request.browserMode || 'none',
       planSha256: request.planSha256 || null,
       progressRevision: 0,
       phase: 'starting',
@@ -78,74 +92,105 @@ export class JobStore {
       lastToolSummary: null,
       verificationState: 'pending',
     };
-    atomicWrite(path.join(dir, 'meta.json'), meta);
+    this.statements.insertJob.run(jobId, 'queued', request.agent, request.cwd, now, now, JSON.stringify(request), JSON.stringify(meta));
     return meta;
   }
 
-  readJson(jobId, name) {
-    const filePath = path.join(this.dir(jobId), name);
-    if (!fs.existsSync(filePath)) return null;
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  row(jobId) {
+    return this.statements.getJob.get(jobId);
   }
 
-  updateMeta(jobId, updater) {
-    const filePath = path.join(this.dir(jobId), 'meta.json');
-    return withFileLock(filePath, () => {
-      const current = this.readJson(jobId, 'meta.json') || { jobId };
-      const next = updater(current);
-      atomicWrite(filePath, next);
-      return next;
-    });
+  readJson(jobId, name) {
+    const row = this.row(jobId);
+    if (!row) return null;
+    if (name === 'request.json') return parseJson(row.request_json);
+    if (name === 'meta.json') return parseJson(row.meta_json);
+    if (name === 'result.json') return parseJson(row.result_json);
+    return null;
   }
 
   writeMeta(jobId, patch) {
-    return this.updateMeta(jobId, (current) => ({ ...current, ...patch, updatedAt: new Date().toISOString() }));
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const row = this.statements.getJob.get(jobId);
+      const current = parseJson(row?.meta_json);
+      if (!current) throw new Error(`Job not found: ${jobId}`);
+      const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+      this.statements.updateJob.run(String(next.status || current.status), next.updatedAt, JSON.stringify(next), jobId);
+      this.db.exec('COMMIT');
+      return next;
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
   }
 
   writeResult(jobId, result) {
-    atomicWrite(path.join(this.dir(jobId), 'result.json'), result);
+    const now = new Date().toISOString();
+    this.statements.writeResult.run(JSON.stringify(result), now, jobId);
+  }
+
+  appendEvent(jobId, event) {
+    this.statements.insertEvent.run(jobId, new Date().toISOString(), JSON.stringify(event));
+  }
+
+  readEvents(jobId, { after = 0, limit = 200 } = {}) {
+    const rows = this.statements.readEvents.all(jobId, Math.max(0, Number(after) || 0), Math.max(1, Math.min(1000, Number(limit) || 200)));
+    const events = rows.map((row) => ({ seq: row.seq, ...parseJson(row.event_json, {}) }));
+    return { events, cursor: events.length ? events[events.length - 1].seq : Math.max(0, Number(after) || 0) };
   }
 
   writeProgress(jobId, patch) {
-    return this.updateMeta(jobId, (current) => {
-      const visibleKeys = ['phase', 'turnsObserved', 'lastTool', 'verificationState'];
-      const changed = visibleKeys.some((key) => patch[key] !== undefined && patch[key] !== current[key]);
-      return {
-        ...current,
-        ...patch,
-        progressRevision: changed ? Number(current.progressRevision || 0) + 1 : Number(current.progressRevision || 0),
-        updatedAt: new Date().toISOString(),
-      };
+    const current = this.readJson(jobId, 'meta.json');
+    if (!current) throw new Error(`Job not found: ${jobId}`);
+    const visibleKeys = ['phase', 'turnsObserved', 'lastTool', 'verificationState'];
+    const changed = visibleKeys.some((key) => patch[key] !== undefined && patch[key] !== current[key]);
+    return this.writeMeta(jobId, {
+      ...patch,
+      progressRevision: changed ? Number(current.progressRevision || 0) + 1 : Number(current.progressRevision || 0),
     });
   }
 
   renewLease(jobId) {
     const current = this.get(jobId);
-    if (current.persistOnDisconnect || !current.leaseTimeoutMs || !['queued', 'starting', 'running'].includes(current.status)) return current;
+    if (current.persistOnDisconnect || !current.leaseTimeoutMs || !ACTIVE_STATUSES.has(current.status)) return current;
     if (current.leaseExpiresAt && Date.now() >= Date.parse(current.leaseExpiresAt)) return current;
     return this.writeMeta(jobId, { leaseExpiresAt: new Date(Date.now() + current.leaseTimeoutMs).toISOString() });
   }
 
   get(jobId) {
-    const meta = this.readJson(jobId, 'meta.json');
+    const meta = toMeta(this.row(jobId));
     if (!meta) throw new Error(`Job not found: ${jobId}`);
-    return { ...meta, resultAvailable: fs.existsSync(path.join(this.dir(jobId), 'result.json')) };
+    return meta;
   }
 
   result(jobId) {
-    const meta = this.get(jobId);
-    const result = this.readJson(jobId, 'result.json');
-    return { meta, result };
+    const row = this.row(jobId);
+    const meta = toMeta(row);
+    if (!meta) throw new Error(`Job not found: ${jobId}`);
+    return { meta, result: parseJson(row.result_json) };
   }
 
   list(limit = 20) {
-    return fs.readdirSync(this.root, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name.startsWith('claude-'))
-      .map((entry) => {
-        try { return this.get(entry.name); } catch { return null; }
-      })
-      .filter(Boolean)
-      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-      .slice(0, limit);
+    return this.statements.listJobs.all(Math.max(1, Math.min(100, Number(limit) || 20))).map(toMeta).filter(Boolean);
+  }
+
+  delete(jobId) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const row = this.statements.getJob.get(jobId);
+      if (!row) throw new Error(`Job not found: ${jobId}`);
+      this.statements.deleteEvents.run(jobId);
+      this.statements.deleteJob.run(jobId);
+      this.db.exec('COMMIT');
+      return { ok: true, jobId };
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
+  close() {
+    this.db.close();
   }
 }

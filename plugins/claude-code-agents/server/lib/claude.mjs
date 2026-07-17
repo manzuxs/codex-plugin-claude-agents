@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { buildDelegationPrompt } from './xml.mjs';
-import { collectSensitiveValues, redactText } from './redact.mjs';
+import { collectSensitiveValues, redactObject, redactText } from './redact.mjs';
 import { browserUseObserved, inspectBrowserInit } from './browser.mjs';
 
 const MAX_CAPTURE_BYTES = 20 * 1024 * 1024;
@@ -168,6 +168,8 @@ function parseEventOutput(events, fallbackText) {
     costUsd: terminal.total_cost_usd ?? terminal.cost_usd ?? null,
     durationMs: terminal.duration_ms ?? null,
     turns: terminal.num_turns ?? null,
+    inputTokens: terminal.usage?.input_tokens ?? terminal.input_tokens ?? null,
+    outputTokens: terminal.usage?.output_tokens ?? terminal.output_tokens ?? null,
     verificationSummary: terminal.verificationSummary ?? terminal.verification_summary,
     structured: events,
   };
@@ -192,6 +194,8 @@ export function parseClaudeOutput(stdout, outputFormat) {
       costUsd: parsed.total_cost_usd ?? parsed.cost_usd ?? null,
       durationMs: parsed.duration_ms ?? null,
       turns: parsed.num_turns ?? null,
+      inputTokens: parsed.usage?.input_tokens ?? parsed.input_tokens ?? null,
+      outputTokens: parsed.usage?.output_tokens ?? parsed.output_tokens ?? null,
       verificationSummary: parsed.verificationSummary ?? parsed.verification_summary,
       structured: parsed,
     };
@@ -262,6 +266,7 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
       if (runtime.outputFormat !== 'stream-json' || !line.trim()) return;
       try {
         const event = JSON.parse(line);
+        const safeEvent = redactObject(JSON.parse(redactText(JSON.stringify(event), secrets)));
         const capability = inspectBrowserInit(event, request);
         if (capability) {
           browserInitObserved = true;
@@ -269,6 +274,7 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
           if (!capability.ok && !capabilityFailure) {
             capabilityFailure = capability;
             onProgress?.({
+              event: safeEvent,
               phase: 'blocked',
               verificationState: 'failed',
               browserCapability: 'missing',
@@ -286,6 +292,7 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
         if (progress.lastToolSummary) progress.lastToolSummary = redactText(progress.lastToolSummary, secrets).slice(0, 256);
         onProgress({
           ...progress,
+          event: safeEvent,
           browserCapability: browserCapabilityReady ? 'ready' : undefined,
           browserBackend: request.browserBackend,
           lastActivityAt: new Date().toISOString(),

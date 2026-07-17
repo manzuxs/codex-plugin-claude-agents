@@ -8,10 +8,11 @@
     "test": "node --test tests/*.test.mjs",
     "doctor": "node plugins/claude-code-agents/scripts/doctor.mjs",
     "list-agents": "node plugins/claude-code-agents/server/cli.mjs list",
-    "dry-run": "node plugins/claude-code-agents/server/cli.mjs run --agent backend-engineer --task 'dry run' --plan 'inspect only' --dry-run"
+    "dry-run": "node plugins/claude-code-agents/server/cli.mjs run --agent backend-engineer --task 'dry run' --plan 'inspect only' --dry-run",
+    "dashboard": "node plugins/claude-code-agents/server/cli.mjs dashboard --open"
   },
   "engines": {
-    "node": ">=18.18"
+    "node": ">=22.5"
   },
   "license": "MIT"
 }

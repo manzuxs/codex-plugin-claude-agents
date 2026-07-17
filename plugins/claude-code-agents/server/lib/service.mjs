@@ -7,6 +7,7 @@ import { assertWorkingDirectory } from './paths.mjs';
 import { runClaude } from './claude.mjs';
 import { buildEvidenceView } from './evidence.mjs';
 import { JobStore } from './job-store.mjs';
+import { ConfigStore } from './config-store.mjs';
 import { browserInstallationHint, inspectRepositoryBrowser, readBrowserMcpConfig } from './browser.mjs';
 
 const DEFAULT_RESULT_TEXT_CHARS = 8000;
@@ -77,12 +78,12 @@ function capObject(value, maxBytes, { shrinkKeys, dropKeys, fallback }) {
 
 function compactMeta(meta) {
   if (!meta) return null;
-  const keys = ['jobId', 'status', 'agent', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'turnsObserved', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'browserCapability', 'browserBackend', 'installationHint', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
+  const keys = ['jobId', 'status', 'agent', 'task', 'cwd', 'browserMode', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'durationMs', 'turns', 'turnsObserved', 'costUsd', 'inputTokens', 'outputTokens', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'browserCapability', 'browserBackend', 'installationHint', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
   const compact = Object.fromEntries(keys.filter((key) => meta[key] !== undefined).map((key) => [key, meta[key]]));
   if (ACTIVE_JOB_STATUSES.has(meta.status)) compact.elapsedMs = Math.max(Number(meta.elapsedMs || 0), Date.now() - Date.parse(meta.startedAt || meta.createdAt));
   else if (meta.elapsedMs !== undefined) compact.elapsedMs = meta.elapsedMs;
   return capObject(compact, MAX_COMPACT_STATUS_BYTES, {
-    shrinkKeys: ['error', 'installationHint', 'cancellationReason', 'lastToolSummary', 'sessionId', 'planSha256', 'agent', 'jobId', 'status'],
+    shrinkKeys: ['error', 'installationHint', 'cancellationReason', 'lastToolSummary', 'sessionId', 'planSha256', 'task', 'agent', 'jobId', 'status'],
     dropKeys: ['leaseExpiresAt', 'updatedAt', 'createdAt', 'startedAt', 'finishedAt', 'lastActivityAt'],
     fallback: (current) => ({
       jobId: String(current.jobId || '').slice(0, 128),
@@ -263,6 +264,7 @@ export class ClaudeAgentService {
     this.dataRoot = dataRoot;
     this.registry = loadAgentRegistry(pluginRoot);
     this.jobs = new JobStore(dataRoot);
+    this.config = new ConfigStore(dataRoot);
     this.ownedJobs = new Set();
     this.leaseTimers = new Map();
   }
@@ -290,8 +292,13 @@ export class ClaudeAgentService {
   }
 
   runtimeFor(agent, cwd, overrides = {}) {
-    const env = loadLayeredEnv({ pluginRoot: this.pluginRoot, cwd });
+    const layeredFiles = loadLayeredEnv({ pluginRoot: this.pluginRoot, cwd, processEnv: {} });
+    const env = { ...layeredFiles, ...this.config.toEnv(), ...process.env };
     return resolveAgentRuntime({ agent, env, overrides });
+  }
+
+  writeAgentConfig({ agent, values }) {
+    return this.config.writeAgentConfig({ agent, values });
   }
 
   listAgents({ cwd = process.cwd() } = {}) {
@@ -377,7 +384,22 @@ export class ClaudeAgentService {
     let result;
     try {
       this.jobs.writeMeta(meta.jobId, { status: 'running', startedAt: new Date().toISOString() });
-      result = await runClaude({ pluginRoot: this.pluginRoot, agent, runtime, request, cwd, signal: input.signal });
+      result = await runClaude({
+        pluginRoot: this.pluginRoot,
+        agent,
+        runtime,
+        request,
+        cwd,
+        signal: input.signal,
+        onProgress: (progress) => {
+          const { event, ...compactProgress } = progress;
+          if (event) this.jobs.appendEvent(meta.jobId, {
+            at: progress.lastActivityAt || new Date().toISOString(),
+            ...event,
+          });
+          this.jobs.writeProgress(meta.jobId, compactProgress);
+        },
+      });
     } catch (error) {
       result = { ok: false, agent: agent.id, planSha256: request.planSha256, cwd, error: error.message };
     }
@@ -389,6 +411,11 @@ export class ClaudeAgentService {
       finishedAt: result.finishedAt || new Date().toISOString(),
       exitCode: result.exitCode,
       sessionId: result.sessionId || null,
+      durationMs: result.durationMs,
+      turns: result.turns,
+      costUsd: result.costUsd,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
       error: result.error,
       cancellationReason: result.cancellationReason,
     });
@@ -430,6 +457,12 @@ export class ClaudeAgentService {
     } catch (error) {
       return { ok: false, jobId, status: meta.status, message: error.message };
     }
+  }
+
+  deleteJob(jobId) {
+    const meta = this.jobs.get(jobId);
+    if (ACTIVE_JOB_STATUSES.has(meta.status)) throw new Error('运行中的任务不能删除，请先取消任务。');
+    return this.jobs.delete(jobId);
   }
 
   dispose(reason = 'mcp_disconnected') {

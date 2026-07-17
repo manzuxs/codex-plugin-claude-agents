@@ -38,6 +38,10 @@ try {
   let browserBackend = null;
   let installationHint = null;
   reportProgress = (progress = {}, force = false) => {
+    if (progress.event) service.jobs.appendEvent(jobId, {
+      at: progress.lastActivityAt || new Date().toISOString(),
+      ...progress.event,
+    });
     if (progress.turnObserved) turnsObserved += 1;
     if (Number.isFinite(progress.turnsObserved)) turnsObserved = Math.max(turnsObserved, progress.turnsObserved);
     if (progress.lastTool) lastTool = progress.lastTool;
@@ -106,6 +110,11 @@ try {
     finishedAt: new Date().toISOString(),
     exitCode: result.exitCode,
     sessionId: result.sessionId || null,
+    durationMs: result.durationMs,
+    turns: result.turns,
+    costUsd: result.costUsd,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
     error: result.error,
     cancellationReason,
   });

@@ -10,6 +10,8 @@ A local Codex plugin that delegates an approved implementation plan to role-spec
 - Eight built-in software delivery roles with dedicated prompts and quality gates.
 - Per-agent model, effort, permission, timeout, budget, gateway, and credential settings.
 - Foreground execution, background jobs, cancellation, result persistence, and session resume.
+- Includes a local visual command center for agent configuration, Codex plugin installation, task dispatch, and streaming session monitoring.
+- Stores configuration, job metadata, results, and redacted event streams in one SQLite WAL database.
 - Real-browser validation for UI, frontend, and QA agents.
 - Repository-native Playwright/Cypress, Claude in Chrome, and browser MCP backends.
 - Browser capability preflight, evidence gates, and actionable installation guidance.
@@ -31,7 +33,7 @@ A local Codex plugin that delegates an approved implementation plan to role-spec
 
 ## Requirements
 
-- Node.js 18.18 or later.
+- Node.js 22.5 or later.
 - A working local `claude` command.
 - A Claude Code login, or a compatible API gateway and credentials.
 - A Codex client that supports local plugins and stdio MCP servers.
@@ -140,6 +142,18 @@ CLAUDE_DEFAULT_API_KEY_KIND=auth_token
 Credentials are injected into the Claude child process environment. They are excluded from CLI arguments, delegation XML, MCP responses, and persisted background job requests.
 
 ## Usage
+
+### Visual command center
+
+Start the local dashboard from the repository root:
+
+```bash
+npm run dashboard
+```
+
+The page detects whether the Codex plugin is installed. When it is missing, use “Start installation” to register the local marketplace and install `claude-code-agents`; restart Codex and create a new task after installation. An installed MCP session can also call `open_dashboard` to launch the same page.
+
+The Configuration Center writes agent runtime settings to `~/.codex/claude-code-agents/claude-agents.sqlite`. Credentials are never returned in clear text. Node.js 22.5 or newer is required for the native `node:sqlite` runtime; WAL mode allows the MCP process, worker, and dashboard to share the database.
 
 Ask Codex to inspect the repository and prepare a concrete plan:
 

@@ -2,6 +2,15 @@ import { compactResult } from './service.mjs';
 
 const TOOL_DEFINITIONS = [
   {
+    name: 'open_dashboard',
+    description: 'Open the local Claude Agents command center in a browser. The dashboard shows agent configuration, task history, and streaming execution events.',
+    inputSchema: {
+      type: 'object',
+      properties: { port: { type: 'integer', minimum: 0, maximum: 65535, default: 0 }, open: { type: 'boolean', default: true } },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'list_agents',
     description: 'List configured Claude Code specialist agents and their non-secret runtime settings.',
     inputSchema: {
@@ -105,6 +114,7 @@ export class McpServer {
     this.service = service;
     this.buffer = '';
     this.activeRequests = new Map();
+    this.dashboard = null;
     this.stopped = false;
   }
 
@@ -150,7 +160,17 @@ export class McpServer {
         const name = params.name;
         const args = params.arguments || {};
         let value;
-        if (name === 'list_agents') value = this.service.listAgents({ cwd: args.cwd });
+        if (name === 'open_dashboard') {
+          if (!this.dashboard) {
+            const { startDashboard } = await import('../dashboard.mjs');
+            this.dashboard = await startDashboard({ service: this.service, pluginRoot: this.service.pluginRoot, port: args.port || 0, open: args.open !== false });
+          } else if (args.open !== false) {
+            const { openDashboardBrowser } = await import('../dashboard.mjs');
+            openDashboardBrowser(this.dashboard.url);
+          }
+          value = { ok: true, url: this.dashboard.url, message: 'Claude Agents dashboard is ready.' };
+        }
+        else if (name === 'list_agents') value = this.service.listAgents({ cwd: args.cwd });
         else if (name === 'run_agent') {
           const controller = new AbortController();
           this.activeRequests.set(id, controller);
@@ -203,6 +223,7 @@ export class McpServer {
     this.stopped = true;
     for (const controller of this.activeRequests.values()) controller.abort(reason);
     this.service.dispose(reason);
+    this.dashboard?.server?.close();
     const deadline = Date.now() + 5000;
     const finish = () => {
       if (this.activeRequests.size === 0 || Date.now() >= deadline) process.exit(0);

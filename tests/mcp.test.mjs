@@ -10,6 +10,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pluginRoot = process.env.CLAUDE_AGENTS_TEST_PLUGIN_ROOT || path.join(root, 'plugins', 'claude-code-agents');
 const server = path.join(pluginRoot, 'server', 'index.mjs');
 
+function isolatedEnv(name, extra = {}) {
+  return { ...process.env, CLAUDE_AGENTS_DATA_ROOT: fs.mkdtempSync(path.join(os.tmpdir(), `claude-agent-${name}-`)), ...extra };
+}
+
 function waitFor(predicate, timeoutMs = 1500) {
   const started = Date.now();
   return new Promise((resolve, reject) => {
@@ -32,6 +36,7 @@ test('plugin MCP manifest launches from its installed root', async () => {
 
   const child = spawn(config.command, config.args, {
     cwd: path.resolve(pluginRoot, config.cwd),
+    env: isolatedEnv('manifest'),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const messages = [];
@@ -51,8 +56,36 @@ test('plugin MCP manifest launches from its installed root', async () => {
   assert.ok(response.result.tools.some((tool) => tool.name === 'run_agent'));
 });
 
+test('MCP open_dashboard starts the local command center without opening a browser', async () => {
+  const child = spawn(process.execPath, [server], { cwd: root, env: isolatedEnv('dashboard'), stdio: ['pipe', 'pipe', 'pipe'] });
+  const messages = [];
+  let buffer = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    let i;
+    while ((i = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, i).trim(); buffer = buffer.slice(i + 1);
+      if (line) messages.push(JSON.parse(line));
+    }
+  });
+  child.stdin.write(JSON.stringify({
+    jsonrpc: '2.0', id: 4, method: 'tools/call',
+    params: { name: 'open_dashboard', arguments: { open: false, port: 0 } },
+  }) + '\n');
+  const response = await waitFor(() => messages.find((message) => message.id === 4), 3000);
+  child.kill('SIGTERM');
+  assert.equal(stderr, '');
+  const result = JSON.parse(response.result.content[0].text);
+  assert.equal(result.ok, true);
+  assert.match(result.url, /^http:\/\/127\.0\.0\.1:\d+$/);
+});
+
 test('MCP server initializes, lists tools, and performs a dry-run delegation', async () => {
-  const child = spawn(process.execPath, [server], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [server], { cwd: root, env: isolatedEnv('dry-run'), stdio: ['pipe', 'pipe', 'pipe'] });
   const messages = [];
   let buffer = '';
   let stderr = '';
@@ -183,7 +216,7 @@ setInterval(() => {}, 1000);
 
   const child = spawn(process.execPath, [server], {
     cwd: root,
-    env: { ...process.env, CLAUDE_BIN: mock, MOCK_STARTED_PATH: startedFile },
+    env: isolatedEnv('cancel', { CLAUDE_BIN: mock, MOCK_STARTED_PATH: startedFile }),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const messages = [];
@@ -229,7 +262,7 @@ test('foreground MCP run returns one compact result and stores full diagnostics 
   fs.chmodSync(mock, 0o755);
   const child = spawn(process.execPath, [server], {
     cwd: root,
-    env: { ...process.env, CLAUDE_BIN: mock },
+    env: isolatedEnv('foreground', { CLAUDE_BIN: mock }),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const messages = [];

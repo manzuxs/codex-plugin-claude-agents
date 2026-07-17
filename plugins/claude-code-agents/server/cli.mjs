@@ -54,13 +54,20 @@ try {
   else if (command === 'status') result = service.status(values.jobId || values._[0], { full: Boolean(values.full), limit: values.limit ? Number(values.limit) : undefined });
   else if (command === 'result') result = service.result(values.jobId || values._[0], { full: Boolean(values.full), maxTextChars: values.maxTextChars ? Number(values.maxTextChars) : undefined });
   else if (command === 'cancel') result = service.cancel(values.jobId || values._[0]);
+  else if (command === 'dashboard') {
+    const { startDashboard } = await import('./dashboard.mjs');
+    const running = await startDashboard({ pluginRoot, service, port: values.port ? Number(values.port) : 0, open: Boolean(values.open) });
+    console.log(running.url);
+    await new Promise(() => {});
+  }
   else {
     console.log(`Usage:
   cli.mjs list [--cwd PATH]
   cli.mjs run --agent ID --task TEXT|@FILE --plan TEXT|@FILE [--cwd PATH] [--background] [--browser-mode MODE] [--browser-mcp-profile NAME] [--dry-run]
   cli.mjs status [JOB_ID] [--full] [--limit 5]
   cli.mjs result [JOB_ID] [--full] [--max-text-chars 12000]
-  cli.mjs cancel JOB_ID`);
+  cli.mjs cancel JOB_ID
+  cli.mjs dashboard [--port PORT] [--open]`);
     process.exit(0);
   }
   console.log(JSON.stringify(result, null, 2));
