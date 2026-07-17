@@ -1,0 +1,29 @@
+plugins/claude-code-agents/dashboard/app.js
+  s_1fbb6c26a95e7b::t_08071348bb5847 3-5,7,17-23,27,32-40,42-47,49-50,52,56-57,61-65,67-71,73,75,77-78,81-124,126-127,129-134,136,138-153,155-163,166-171,173,175-244,246,248,250-253,255-256,259-267,269-274,277-283,285-287,289-293,296-315,317-318,322-323,326,329-333,336-337,340,342,345,347-355,357-359,361-363
+  s_1fbb6c26a95e7b::t_676fa06a5e4827 294-295
+plugins/claude-code-agents/dashboard/index.html
+  s_1fbb6c26a95e7b::t_5295fb5829ec90 7,13-19,21,24-33,36-53,56-67,70-80,83-97,101-108,111-138,140-152
+plugins/claude-code-agents/dashboard/styles.css
+  s_1fbb6c26a95e7b::t_162926c632ee42 176
+  s_1fbb6c26a95e7b::t_d7d9f66049a239 214
+  s_1fbb6c26a95e7b::t_78f2288473a177 227-234
+  s_1fbb6c26a95e7b::t_8514954525723b 1-175,177-183,185-200,202-213,216-226,235-237
+  s_1fbb6c26a95e7b::t_40027e5021f3f5 184,215
+  s_1fbb6c26a95e7b::t_aa381cb8df972e 201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "3df931b2d9e2afc0d3d4690e3004c5f3f2d6c423",
+  "prompts": {},
+  "sessions": {
+    "s_1fbb6c26a95e7b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6f52-a62c-7c72-b060-e8cccce875eb",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
