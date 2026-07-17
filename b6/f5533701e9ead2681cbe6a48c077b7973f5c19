@@ -1,0 +1,177 @@
+plugins/claude-code-agents/server/lib/job-store.mjs
+  s_a44b79fd9d38f0::t_0eca5535d268e1 113-125
+  s_a44b79fd9d38f0::t_2a318262a8f9af 133,135-137
+  s_a44b79fd9d38f0::t_09e62e679ce87e 65-66,176-190
+  s_a44b79fd9d38f0::t_c36e12c1337b24 7
+  s_a44b79fd9d38f0::t_eb987db467e69b 32
+  s_a44b79fd9d38f0::t_2032fb72812dee 84
+  s_a44b79fd9d38f0::t_2b9c2c1b69d586 5-6,8-10,13-23,28-31,33-64,67,76,80,95,99-100,103-109,129-131,134,138-140,144-150,156,162,164,168-171,175,191-194
+  s_a44b79fd9d38f0::t_a1ca84e7248c75 82
+  s_a44b79fd9d38f0::t_cc533631294ee5 132
+tests/sqlite.test.mjs
+  s_a44b79fd9d38f0::t_1d9c31cba4044d 24-35
+  s_a44b79fd9d38f0::t_1b19e3fd7840bb 1-23,36-49
+  s_a44b79fd9d38f0::t_526e8d2ec16cd2 50-60
+plugins/claude-code-agents/server/worker.mjs
+  s_a44b79fd9d38f0::t_2032fb72812dee 113-117
+  s_a44b79fd9d38f0::t_2a318262a8f9af 41-44
+plugins/claude-code-agents/server/lib/service.mjs
+  s_a44b79fd9d38f0::t_2032fb72812dee 81,414-418
+  s_a44b79fd9d38f0::t_2a318262a8f9af 387-394,397,399,401-402
+  s_a44b79fd9d38f0::t_09e62e679ce87e 302,462-467
+  s_a44b79fd9d38f0::t_139399bfe9ec53 395-396,398,400
+  s_a44b79fd9d38f0::t_1120353b672edd 10,267,295-296,300-301
+  s_a44b79fd9d38f0::t_a1ca84e7248c75 86
+  s_a44b79fd9d38f0::t_1a7b61c444132d 303
+plugins/claude-code-agents/server/cli.mjs
+  s_a44b79fd9d38f0::t_3f1e4aacfa44cc 57-62,69-70
+README.md
+  s_a44b79fd9d38f0::t_80283d71e0f3c3 13-14,146-156
+  s_a44b79fd9d38f0::t_5b80c925d7162d 36
+  s_a44b79fd9d38f0::t_740766b942affb 157
+plugins/claude-code-agents/dashboard/layout-overrides.css
+  s_cb6ac841b57a72::t_810725c136571a 691-701
+  s_87a19dd2a723b8::t_4237fe8b163e6d 872-877,961,1060-1061,1112-1116,1118-1119,1128-1157,1159-1160,1162-1166,1168-1169,1171-1173
+  s_a44b79fd9d38f0::t_21493f7578662d 185-188
+  s_a44b79fd9d38f0::t_171e5e9a7f073b 28-38,555-563,771-772
+  s_87a19dd2a723b8::t_b997f67ce29e1d 40
+  s_cb6ac841b57a72::t_3fc34a5d443420 564-578
+  s_87a19dd2a723b8::t_123ac2cf521e2a 411-421
+  s_25ca75dd48e71c::t_6993d79653238f 51-52,54-77
+  s_87a19dd2a723b8::t_20dfb51ad84f3b 269-272,313-314,318,330,333-341
+  s_cb6ac841b57a72::t_fc63863090f01e 226-268,273-312,315-317,319-329,331-332,342-410,422-449,459-554
+  s_a44b79fd9d38f0::t_48d26c9c4ff6b2 39,41-50,53,78-86,88-100,102-122,133-145,147,150-182
+  s_9084cb67a82744::t_066d8884fc4213 773-813,815-821,823-835,837-838,840,862,864-871,878-879,882-904,948-951,953-960,962-1059,1062-1086,1088-1091,1093-1111,1117,1120-1127,1174-1236,1238-1288,1291-1352,1354-1356
+  s_9084cb67a82744::t_c4e297ce23b2e9 822,836,839,841-861,863,880-881,905-947,952,1237
+  s_87a19dd2a723b8::t_1c69e0c47a35be 1167
+  s_9084cb67a82744::t_16c7cb86b38e26 1289-1290
+  s_a44b79fd9d38f0::t_cae465f369ac10 584,668-680,682-684
+  s_a44b79fd9d38f0::t_29051039337de0 1-27
+  s_9084cb67a82744::t_e28431c43357b0 814
+  s_87a19dd2a723b8::t_5664cfb0d4f6ad 123-132,450-458,1161,1170,1353
+  s_87a19dd2a723b8::t_c72440b3e89252 1087,1092,1158
+  s_a44b79fd9d38f0::t_1d9c31cba4044d 87,101,146,148-149,183-184,189-225,579-583,585-667,681,685-690,702-770
+README.zh-CN.md
+  s_a44b79fd9d38f0::t_5b80c925d7162d 38
+  s_a44b79fd9d38f0::t_80283d71e0f3c3 15-16,148-158
+  s_a44b79fd9d38f0::t_e804bd80258f8a 159
+package.json
+  s_a44b79fd9d38f0::t_3f1e4aacfa44cc 11-12,15
+plugins/claude-code-agents/skills/claude-agent-admin/SKILL.md
+  s_a44b79fd9d38f0::t_ae01ed0542820d 10-12,21-23
+plugins/claude-code-agents/server/lib/mcp.mjs
+  s_a44b79fd9d38f0::t_3f1e4aacfa44cc 5-12,117,163-164,166-167,169-173,226
+  s_a44b79fd9d38f0::t_b2b109b519caf1 165,168
+  s_a44b79fd9d38f0::t_4328d4a807d3c0 4
+plugins/claude-code-agents/dashboard/styles.css
+  s_a44b79fd9d38f0::t_4a16dde9f60432 1
+tests/mcp.test.mjs
+  s_a44b79fd9d38f0::t_1d9c31cba4044d 13-16,39,60,88,219,265
+  s_a44b79fd9d38f0::t_62c64ffd5d95b4 59,61-86
+plugins/claude-code-agents/server/lib/claude.mjs
+  s_a44b79fd9d38f0::t_2a318262a8f9af 5,269,277,295
+  s_a44b79fd9d38f0::t_1d9c31cba4044d 171-172,197-198
+plugins/claude-code-agents/server/lib/config-store.mjs
+  s_a44b79fd9d38f0::t_11aa3c8815bca5 3,6-7,43-47,49-62,64-65,68,70-76,78-92,95-101,103-108
+  s_a44b79fd9d38f0::t_2032fb72812dee 8,11-42,69,93-94
+  s_a44b79fd9d38f0::t_139399bfe9ec53 1-2,4-5,9-10,63,66-67,77,102,109
+  s_a44b79fd9d38f0::t_eb987db467e69b 48
+plugins/claude-code-agents/server/dashboard.mjs
+  s_25ca75dd48e71c::t_7e4c563fa98e25 11-12,48-51,53-57,60-63,69-72,74-75,77,80
+  s_a44b79fd9d38f0::t_3c024d8532aa15 105-106
+  s_a44b79fd9d38f0::t_f690631fbe319e 110,118
+  s_a44b79fd9d38f0::t_139399bfe9ec53 1-10,13-47,52,58-59,64-67,78,83-84,86-95,102-104,107-109,113-117,120-129,153-156,166,168-181,183-194
+  s_a44b79fd9d38f0::t_3f1e4aacfa44cc 85,182
+  s_a44b79fd9d38f0::t_09e62e679ce87e 130-133
+  s_25ca75dd48e71c::t_beb5da0d38baf2 73,76,79,82,164
+  s_a44b79fd9d38f0::t_cfed951ca91e70 119
+  s_a44b79fd9d38f0::t_553afce6e6f5b2 167
+  s_a44b79fd9d38f0::t_35aba4dcafdf5b 111
+  s_a44b79fd9d38f0::t_6d1471266333b3 134-152
+  s_a44b79fd9d38f0::t_2032fb72812dee 68,81,96-101,112,161-163,165
+  s_9084cb67a82744::t_f55b4010e5f4a3 157-160
+plugins/claude-code-agents/dashboard/index.html
+  s_a44b79fd9d38f0::t_4a16dde9f60432 1-8,10-20,22-25,36-37,39-44,48,63,65-69,71,74-76,78-79,81,83,85-86,88-90
+  s_a44b79fd9d38f0::t_09e62e679ce87e 47
+  s_a44b79fd9d38f0::t_492e555d99d4a9 21,38,64,72,82,84,87
+  s_cb6ac841b57a72::t_59e6d18446af70 77
+  s_a44b79fd9d38f0::t_171e5e9a7f073b 9
+  s_9084cb67a82744::t_f55b4010e5f4a3 49-62
+  s_cb6ac841b57a72::t_8ddb9173ebfbb1 70
+  s_25ca75dd48e71c::t_7e4c563fa98e25 80
+  s_87a19dd2a723b8::t_c72440b3e89252 27
+  s_cb6ac841b57a72::t_906e2bd6ccf12d 26,28-35
+  s_87a19dd2a723b8::t_0c89ede17746fb 45-46,73
+plugins/claude-code-agents/dashboard/app.js
+  s_87a19dd2a723b8::t_db9cc681590923 52-58,103-104,108-118,136,138-139,144,148,180-181,192,209-210,222,240,243-246
+  s_cb6ac841b57a72::t_886477c9bedbb1 137,140-143,145,168-172,177,182-191,193-200
+  s_a44b79fd9d38f0::t_c962a0b123e9ef 2,5,7,15-26,59-87,89-98,100,102,119-128,130-131,134-135,146-147,163,165-167,173-176,204-208,212-213,223-229,247-250,252-257,261-267,269-291,297-299,301-305,307-308,312-317,319-329,336-338,341-353,364-401,404-407,409-445,485-493,495,519-522,532
+  s_9084cb67a82744::t_c4e297ce23b2e9 355-362
+  s_a44b79fd9d38f0::t_d231bda4674861 477-482
+  s_9084cb67a82744::t_e28431c43357b0 48-51,154-155
+  s_a44b79fd9d38f0::t_4a16dde9f60432 1,6,8-14,88,99,129,132-133,178,201-203
+  s_a44b79fd9d38f0::t_35aba4dcafdf5b 179,292-296,300
+  s_cb6ac841b57a72::t_482d652604c942 230-239,241-242
+  s_cb6ac841b57a72::t_547f0ca7da5358 105,107
+  s_cb6ac841b57a72::t_a512457aee0aca 27-34,42-47
+  s_9084cb67a82744::t_f55b4010e5f4a3 4,35-41,149-153,156-159,211,306,354,363
+  s_25ca75dd48e71c::t_7e4c563fa98e25 251,258-260,402-403,408
+  s_a44b79fd9d38f0::t_efcc2896d2ab15 309-311,339-340
+  s_25ca75dd48e71c::t_6993d79653238f 334-335,447-454
+  s_a44b79fd9d38f0::t_3eb16a5c401a9e 3,106,161-162,318,446,455-476,483-484
+  s_87a19dd2a723b8::t_9c1dd4fa66eb0a 164
+  s_cb6ac841b57a72::t_5f4bd2bd39e854 268
+  s_a44b79fd9d38f0::t_553afce6e6f5b2 330-333
+  s_cb6ac841b57a72::t_9fc75cbdfd2701 494,496-514,518
+  s_cb6ac841b57a72::t_13ea91cc6607f6 214-221
+  s_87a19dd2a723b8::t_c72440b3e89252 160
+  s_87a19dd2a723b8::t_50d92e54e43337 101,515-517,523-531
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b6f5533701e9ead2681cbe6a48c077b7973f5c19",
+  "prompts": {},
+  "sessions": {
+    "s_25ca75dd48e71c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6e98-56ff-7681-a806-ecf13226d704",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_87a19dd2a723b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6eec-b81b-79c1-a9aa-aa2cf1d3098b",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_9084cb67a82744": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6ec9-88c6-73c2-9c7f-c0294b9709d3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_a44b79fd9d38f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6df9-c175-7c90-bbd5-cd203460f9e1",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_cb6ac841b57a72": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0914cf6e2ffev1ARSzmvZovf9T",
+        "model": "kimi-k3"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
