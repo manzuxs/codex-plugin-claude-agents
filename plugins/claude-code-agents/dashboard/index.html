@@ -4,86 +4,153 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="dashboard-token" content="__DASHBOARD_TOKEN__">
-  <title>Claude Agents 指挥中心</title>
+  <title>Claude Agents 智慧指挥大屏</title>
   <link rel="stylesheet" href="/styles.css">
-  <link rel="stylesheet" href="/layout-overrides.css">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-      <div class="brand-copy"><strong>Claude Agents 指挥中心</strong><small>LOCAL ORCHESTRATION CONSOLE</small></div>
-      <nav class="topnav" aria-label="主导航">
-        <button class="nav-item active" data-view="live">实时任务</button>
-      </nav>
-      <div class="top-spacer"></div>
-      <div class="clock" id="clock">2026-07-17 14:32:18</div>
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div class="brand-copy">
+        <strong>Claude Agents <span>智慧指挥大屏</span></strong>
+        <small>本地多智能体研发协同与自动化执行平台</small>
+      </div>
+      <div class="topbar-line" aria-hidden="true"></div>
+      <div class="clock" id="clock">—</div>
       <div class="health-pill" id="connection-state"><i></i><span>正在连接</span></div>
-      <button class="icon-button" id="install-open" title="安装或检查 Codex 插件">安装</button>
-      <button class="primary-button" id="run-open"><span class="play">▶</span> 发起任务</button>
+      <button class="settings-button" id="settings-open" type="button">设置</button>
     </header>
 
-    <div class="kpi-bar" id="kpi-bar" aria-label="全局态势">
-      <div class="kpi"><span>智能体总数</span><b id="kpi-agents">0</b></div>
-      <div class="kpi"><span>运行中</span><b id="kpi-running">0</b></div>
-      <div class="kpi"><span>排队中</span><b id="kpi-queued">0</b></div>
-      <div class="kpi"><span>已完成</span><b id="kpi-completed">0</b></div>
-      <div class="kpi"><span>今日 Token</span><b id="kpi-tokens">—</b></div>
-      <div class="kpi"><span>成功率</span><b id="kpi-success">—</b></div>
-      <div class="kpi-bar-actions"><button class="ghost-button" id="kpi-refresh" title="立即刷新">刷新</button></div>
-    </div>
+    <section class="kpi-bar" aria-label="全局态势">
+      <article class="kpi"><span class="kpi-icon cyan">AG</span><div><small>智能体</small><b id="kpi-agents">0</b><em>可调度角色</em></div></article>
+      <article class="kpi"><span class="kpi-icon blue">RUN</span><div><small>运行中</small><b id="kpi-running">0</b><em>实时执行</em></div></article>
+      <article class="kpi"><span class="kpi-icon amber">Q</span><div><small>排队</small><b id="kpi-queued">0</b><em>等待资源</em></div></article>
+      <article class="kpi"><span class="kpi-icon green">OK</span><div><small>已完成</small><b id="kpi-completed">0</b><em>历史任务</em></div></article>
+      <article class="kpi"><span class="kpi-icon cyan">%</span><div><small>成功率</small><b id="kpi-success">—</b><em>终态任务</em></div></article>
+      <article class="kpi"><span class="kpi-icon blue">T</span><div><small>Token</small><b id="kpi-tokens">—</b><em>累计用量</em></div></article>
+      <article class="kpi"><span class="kpi-icon amber">TIME</span><div><small>平均耗时</small><b id="kpi-duration">—</b><em>已结束任务</em></div></article>
+      <article class="kpi"><span class="kpi-icon green">$</span><div><small>成本</small><b id="kpi-cost">—</b><em>累计记录</em></div></article>
+    </section>
 
     <main class="dashboard-grid">
-      <aside class="agent-rail panel-surface">
-        <div class="section-heading"><div><span class="eyebrow">AGENT NETWORK</span><h2>智能体矩阵</h2></div><span class="online-count" id="online-count">8 个智能体</span></div>
-        <div class="rail-rule"></div>
-        <div id="agent-list" class="agent-list"></div>
+      <aside class="left-column">
+        <section class="panel task-state-panel">
+          <header class="panel-head"><h2>任务状态分布</h2><span id="task-total-label">0 项任务</span></header>
+          <div class="donut-layout">
+            <div class="donut-wrap"><canvas id="status-donut" aria-label="任务状态分布图"></canvas><div class="donut-center"><b id="donut-total">0</b><small>总任务数</small></div></div>
+            <div class="legend-list" id="status-legend"></div>
+          </div>
+        </section>
+
+        <section class="panel load-panel">
+          <header class="panel-head"><h2>智能体负载排行</h2><span>任务占比</span></header>
+          <div class="load-list" id="agent-load-list"></div>
+        </section>
+
+        <section class="panel recent-panel">
+          <header class="panel-head"><h2>最近任务</h2><button class="text-button" id="recent-refresh" type="button">刷新</button></header>
+          <div class="recent-list" id="recent-list"></div>
+        </section>
       </aside>
 
-      <section class="live-center panel-surface">
-        <div class="session-header">
-          <div class="agent-emblem" id="hero-emblem">BE</div>
-          <div class="session-title"><div><h1 id="hero-agent">后端工程师</h1><span class="live-state" id="hero-state"><i></i> 待机</span></div><p id="hero-task">等待 Codex 发起任务</p><div class="session-meta" id="hero-session"><span class="meta-chip"><span class="meta-label">会话 ID</span><span class="meta-value" id="meta-session-value">—</span><button class="copy-button hidden" data-copy="meta-session-value" aria-label="复制会话 ID" title="复制">⎘</button></span><span class="meta-chip"><span class="meta-label">工作目录</span><span class="meta-value" id="meta-cwd-value">—</span><button class="copy-button hidden" data-copy="meta-cwd-value" aria-label="复制工作目录" title="复制">⎘</button></span><span class="meta-chip"><span class="meta-label">浏览器</span><span class="meta-value" id="meta-browser-value">—</span></span></div></div>
-          <div class="session-actions"><button class="danger-button hidden" id="cancel-job" aria-label="取消任务" title="取消任务">⏹</button></div>
-        </div>
-        <section class="task-overview" id="task-overview" aria-live="polite">
-          <div class="overview-result">
-            <span class="overview-kicker">任务结果</span>
-            <strong id="overview-title">等待任务</strong>
-            <p id="overview-summary">选择一条任务记录后查看执行结果。</p>
-            <small id="overview-verification"></small>
+      <section class="center-column">
+        <section class="constellation-panel">
+          <header class="constellation-head">
+            <div><small>AGENT ORCHESTRATION NETWORK</small><h1>多智能体协同编排全景</h1></div>
+            <span class="live-badge"><i></i> 实时拓扑</span>
+          </header>
+          <div class="constellation" id="constellation">
+            <img class="core-art" src="/assets/orchestration-core.png" alt="数字编排核心背景">
+            <div class="orbit orbit-a"><i></i><i></i><i></i></div>
+            <div class="orbit orbit-b"><i></i><i></i></div>
+            <div class="core-label"><b>CLAUDE</b><span>LOCAL ORCHESTRATOR</span><em id="core-throughput">0 events</em></div>
+            <div class="agent-nodes" id="agent-nodes"></div>
           </div>
-          <dl class="overview-stats">
-            <div><dt>状态</dt><dd id="overview-status">待机</dd></div>
-            <div><dt>耗时</dt><dd id="overview-duration">—</dd></div>
-            <div><dt>验证</dt><dd id="overview-check">等待执行</dd></div>
-          </dl>
         </section>
-        <div class="session-tabs"><button class="tab active" data-tab="events">执行记录 <b id="event-count">0</b></button><button class="tab" data-tab="tools">工具调用 <b id="tool-count">0</b></button><button class="tab" data-tab="files">文件变更 <b id="file-count">0</b></button><button class="tab" data-tab="checks">检查结果 <b id="check-count">0</b></button><div class="stream-control"><span id="stream-status">未连接</span><span>自动滚动</span><label class="switch"><input id="autoscroll" type="checkbox" checked><span></span></label></div></div>
-        <div class="event-viewport" id="event-viewport"><div class="empty-events"><span class="pulse-ring"></span><strong>等待实时会话</strong><small>从右上角发起一个任务，Claude 的工作过程会在这里流式出现。</small></div></div>
-        <div class="command-row"><span id="last-update">尚无会话数据</span><button id="refresh-events" class="ghost-button">刷新会话</button></div>
+
+        <div class="center-bottom">
+          <section class="panel execution-panel">
+            <header class="panel-head"><h2>任务执行概览</h2><span>最近 7 日</span></header>
+            <canvas id="execution-chart" aria-label="任务执行概览图"></canvas>
+          </section>
+          <section class="panel pulse-panel">
+            <header class="panel-head"><h2>实时事件脉冲</h2><button class="text-button" id="pulse-more" type="button">查看会话</button></header>
+            <div class="pulse-list" id="pulse-list"></div>
+          </section>
+        </div>
       </section>
 
-      <aside class="telemetry panel-surface">
-        <div class="section-heading"><div><span class="eyebrow">SESSION MONITOR</span><h2>会话监控</h2></div><span class="running-dot" id="monitor-state"><i></i> 待机</span></div>
-        <div class="telemetry-rule"></div>
-        <div class="metric-stack"><div class="metric"><span class="metric-icon cyan">◈</span><div><small>模型</small><strong id="metric-model">Sonnet</strong></div></div><div class="metric"><span class="metric-icon amber">≋</span><div><small>思考强度</small><strong id="metric-effort">High</strong></div></div><div class="metric"><span class="metric-icon green">▣</span><div><small>权限模式</small><strong id="metric-permission">Auto</strong></div></div></div>
-        <div class="telemetry-block"><div class="block-label">运行时长 <span id="metric-start">—</span></div><div class="big-number" id="metric-duration">00:00:00</div></div>
-        <div class="telemetry-block"><div class="block-label">实际成本</div><div class="cost-number" id="metric-cost">—</div></div>
-        <div class="telemetry-block token-block" id="token-block"><div class="block-label"><span>令牌使用</span><span class="muted-badge" id="token-status">—</span></div><div class="token-row"><span>输入</span><b id="token-in">—</b></div><div class="token-row"><span>输出</span><b id="token-out">—</b></div><div class="token-total"><span>轮次</span><b id="metric-turns">—</b></div></div>
+      <aside class="right-column">
+        <section class="panel resource-panel">
+          <header class="panel-head"><h2>执行资源监控</h2><span>实时采样</span></header>
+          <div class="resource-list" id="resource-list"></div>
+        </section>
+
+        <section class="panel success-panel">
+          <header class="panel-head"><h2>任务成功率趋势</h2><span>最近 7 日</span></header>
+          <canvas id="success-chart" aria-label="任务成功率趋势图"></canvas>
+        </section>
+
+        <section class="panel alert-panel">
+          <header class="panel-head"><h2>系统告警</h2><span id="alert-count">0 条</span></header>
+          <div class="alert-list" id="alert-list"></div>
+        </section>
       </aside>
     </main>
 
-    <footer class="statusbar"><div><span class="eyebrow">LOCAL RUNTIME</span><b>数据源</b><em id="data-freshness">等待连接</em></div><div><span>系统状态</span><b class="green-text" id="system-state">正常</b></div><div><span>存储引擎</span><strong class="green-text">SQLite / WAL</strong></div></footer>
+    <footer class="statusbar">
+      <div><span class="status-icon">LOCAL</span><small>本地服务</small><b id="system-state">正常</b></div>
+      <div><span class="status-icon">DB</span><small>SQLite WAL</small><b>正常</b></div>
+      <div><span class="status-icon">CLI</span><small>Claude CLI</small><b id="cli-state">已连接</b></div>
+      <div><span class="status-icon">SSE</span><small>事件流</small><b id="stream-footer">待机</b></div>
+      <div><span class="status-icon">WEB</span><small>浏览器取证</small><b>可用</b></div>
+      <div><span class="status-icon">SYNC</span><small>数据更新时间</small><b id="data-freshness">等待连接</b></div>
+    </footer>
   </div>
 
-  <div class="modal-backdrop hidden" id="install-modal"><section class="modal install-modal" role="dialog" aria-modal="true" aria-labelledby="install-title"><div class="modal-kicker">CODEX PLUGIN BOOTSTRAP</div><h2 id="install-title">安装 Claude Code Agents</h2><p>从当前仓库注册 marketplace，并安装或更新 MCP Server 与智能体技能。操作完成后，重启 Codex 新任务即可加载。</p><div class="install-steps"><div><span>01</span><b>检查 Codex CLI</b><i id="step-codex">等待</i></div><div><span>02</span><b>注册或刷新 marketplace</b><i id="step-marketplace">等待</i></div><div><span>03</span><b>安装插件并启用 MCP</b><i id="step-plugin">等待</i></div></div><pre id="install-output">正在检查安装状态。</pre><div class="modal-actions"><button class="ghost-button" data-close="install-modal">关闭</button><button class="primary-button" id="install-run">开始安装</button></div></section></div>
+  <div class="modal-backdrop hidden" id="settings-modal">
+    <section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <header class="modal-title-row"><div><span class="modal-kicker">SYSTEM SETTINGS</span><h2 id="settings-title">设置中心</h2><p>管理智能体运行参数与 Codex 插件安装状态。</p></div><button class="close-button" data-close="settings-modal" aria-label="关闭设置">×</button></header>
+      <div class="settings-tabs" role="tablist"><button class="settings-tab active" data-settings-tab="agent" type="button">智能体参数</button><button class="settings-tab" data-settings-tab="install" type="button">插件安装</button></div>
+      <div class="settings-pane active" data-settings-pane="agent">
+        <label class="field-label">选择智能体<select id="config-agent"></select></label>
+        <div class="form-grid">
+          <label class="field-label">模型<input id="cfg-model" placeholder="sonnet"></label>
+          <label class="field-label">思考强度<select id="cfg-effort"><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option><option value="max">最大</option></select></label>
+          <label class="field-label">权限模式<select id="cfg-permission"><option value="auto">自动确认</option><option value="plan">仅规划</option><option value="acceptEdits">自动接受编辑</option><option value="bypassPermissions">跳过权限确认</option></select></label>
+          <label class="field-label">输出格式<select id="cfg-output"><option value="text">文本</option><option value="json">JSON</option><option value="stream-json">流式 JSON</option></select></label>
+          <label class="field-label">超时时间（毫秒）<input id="cfg-timeout" type="number" min="1000" step="1000"></label>
+          <label class="field-label">预算上限（USD）<input id="cfg-budget" type="number" min="0" step="0.1"></label>
+          <label class="field-label">API 网关<input id="cfg-gateway" placeholder="https://…"></label>
+          <label class="field-label">凭据类型<select id="cfg-key-kind"><option value="auth_token">认证令牌</option><option value="api_key">API 密钥</option></select></label>
+          <label class="field-label">更新凭据<input id="cfg-api-key" type="password" placeholder="留空保持不变"></label>
+          <label class="field-label browser-profiles">浏览器 MCP Profiles（JSON）<textarea id="cfg-browser-profiles" rows="3" placeholder='{"playwright":"/absolute/path/mcp.json"}'></textarea></label>
+        </div>
+        <div class="modal-actions"><button class="primary-button" id="config-save" type="button">保存并应用</button></div>
+      </div>
+      <div class="settings-pane" data-settings-pane="install">
+        <p class="pane-copy">从当前仓库注册 marketplace，并安装或更新 MCP Server 与智能体技能。操作完成后重启 Codex，新任务即可加载。</p>
+        <div class="install-steps"><div><span>01</span><b>检查 Codex CLI</b><i id="step-codex">等待</i></div><div><span>02</span><b>注册或刷新 Marketplace</b><i id="step-marketplace">等待</i></div><div><span>03</span><b>安装插件并启用 MCP</b><i id="step-plugin">等待</i></div></div>
+        <pre id="install-output">正在检查安装状态。</pre>
+        <div class="modal-actions"><button class="primary-button" id="install-run" type="button">开始安装</button></div>
+      </div>
+    </section>
+  </div>
 
-  <div class="modal-backdrop hidden" id="config-modal"><section class="modal config-modal" role="dialog" aria-modal="true" aria-labelledby="config-title"><div class="modal-kicker">RUNTIME CONFIGURATION</div><div class="modal-title-row"><div><h2 id="config-title">智能体配置</h2><p>配置写入本地 SQLite，凭据不会返回页面。</p></div><button class="close-button" data-close="config-modal" aria-label="关闭配置">×</button></div><label class="field-label">选择智能体<select id="config-agent"></select></label><div class="form-grid"><label class="field-label">模型<input id="cfg-model" placeholder="sonnet"></label><label class="field-label">思考强度<select id="cfg-effort"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">XHigh</option><option value="max">Max</option></select></label><label class="field-label">权限模式<select id="cfg-permission"><option value="auto">Auto</option><option value="plan">Plan</option><option value="acceptEdits">Accept Edits</option><option value="bypassPermissions">Bypass Permissions</option></select></label><label class="field-label">输出格式<select id="cfg-output"><option value="text">Text</option><option value="json">JSON</option><option value="stream-json">Stream JSON</option></select></label><label class="field-label">超时时间（毫秒）<input id="cfg-timeout" type="number" min="1000" step="1000"></label><label class="field-label">预算上限（USD）<input id="cfg-budget" type="number" min="0" step="0.1"></label><label class="field-label">API 网关<input id="cfg-gateway" placeholder="https://…"></label><label class="field-label">凭据类型<select id="cfg-key-kind"><option value="auth_token">Auth Token</option><option value="api_key">API Key</option></select></label><label class="field-label">更新凭据<input id="cfg-api-key" type="password" placeholder="留空保持不变"></label><label class="field-label browser-profiles">浏览器 MCP Profiles（JSON）<textarea id="cfg-browser-profiles" rows="3" placeholder='{"playwright":"/absolute/path/mcp.json"}'></textarea></label></div><div class="modal-actions"><button class="ghost-button" data-close="config-modal">取消</button><button class="primary-button" id="config-save">保存并应用</button></div></section></div>
+  <div class="modal-backdrop hidden" id="session-modal">
+    <section class="modal session-modal" role="dialog" aria-modal="true" aria-labelledby="session-title">
+      <header class="session-header">
+        <div class="session-role-icon" id="session-role-icon"></div>
+        <div class="session-title"><div><h2 id="session-title">智能体会话</h2><span class="live-state" id="session-state"><i></i><span>待机</span></span></div><p id="session-task">暂无任务</p><small id="session-meta">—</small></div>
+        <button class="close-button" data-close="session-modal" aria-label="关闭会话">×</button>
+      </header>
+      <section class="task-overview" id="task-overview"><div><span>任务结果</span><strong id="overview-title">等待任务</strong><p id="overview-summary">该智能体暂无任务记录。</p><small id="overview-verification"></small></div><dl><div><dt>状态</dt><dd id="overview-status">待机</dd></div><div><dt>耗时</dt><dd id="overview-duration">—</dd></div><div><dt>验证</dt><dd id="overview-check">—</dd></div><div><dt>成本</dt><dd id="overview-cost">—</dd></div></dl></section>
+      <div class="session-tabs"><button class="tab active" data-tab="events">执行记录 <b id="event-count">0</b></button><button class="tab" data-tab="tools">工具调用 <b id="tool-count">0</b></button><button class="tab" data-tab="files">文件变更 <b id="file-count">0</b></button><button class="tab" data-tab="checks">检查结果 <b id="check-count">0</b></button><span id="stream-status">未连接</span></div>
+      <div class="event-viewport" id="event-viewport"></div>
+      <footer class="session-footer"><span id="session-runtime">模型 — · 思考强度 — · 权限 —</span><button class="ghost-button" id="refresh-events" type="button">刷新会话</button></footer>
+    </section>
+  </div>
 
-  <div class="modal-backdrop hidden" id="run-modal"><section class="modal run-modal" role="dialog" aria-modal="true" aria-labelledby="run-title"><div class="modal-kicker">DISPATCH NEW SESSION</div><div class="modal-title-row"><div><h2 id="run-title">发起任务</h2><p>执行快照会随任务写入 SQLite，并持续记录实时会话。</p></div><button class="close-button" data-close="run-modal" aria-label="关闭任务">×</button></div><div class="form-grid"><label class="field-label">目标智能体<select id="run-agent"></select></label><label class="field-label">工作目录<input id="run-cwd" placeholder="当前仓库绝对路径"></label><label class="field-label">浏览器模式<select id="run-browser"><option value="none">None</option><option value="repository">Repository</option><option value="chrome">Chrome</option><option value="mcp">MCP</option></select></label><label class="field-label">浏览器 Profile<input id="run-browser-profile" placeholder="仅 MCP 模式需要"></label></div><label class="field-label">任务目标<textarea id="run-task" rows="3" placeholder="例如：实现订单查询接口并补齐测试"></textarea></label><label class="field-label">已批准计划<textarea id="run-plan" rows="5">1. 检查相关模块和现有测试。
-2. 按项目约定完成实现。
-3. 运行验证并报告变更。</textarea></label><label class="field-label">验收标准<textarea id="run-criteria" rows="2" placeholder="可选：必须满足的行为与验证证据"></textarea></label><div class="modal-actions"><button class="ghost-button" data-close="run-modal">取消</button><button class="primary-button" id="run-submit"><span class="play">▶</span> 开始执行</button></div></section></div>
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
   <script type="module" src="/app.js"></script>
 </body>
