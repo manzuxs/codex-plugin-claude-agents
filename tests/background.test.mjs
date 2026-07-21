@@ -149,7 +149,7 @@ test('adaptive polling backs off at 60, 120, and 180 seconds', () => {
   assert.equal(changed.nextPollSeconds, 60);
 });
 
-test('MCP service heartbeat renews a background lease independently of status polling', async () => {
+test('job status polling renews a background lease and idle sessions expire', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-heartbeat-'));
   const dataRoot = path.join(temp, 'data');
   const mock = path.join(temp, 'claude-mock.mjs');
@@ -168,14 +168,17 @@ test('MCP service heartbeat renews a background lease independently of status po
       background: true,
       leaseTimeoutMs: 1000,
     });
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await waitFor(() => service.jobs.get(created.jobId).status === 'running');
+    for (let index = 0; index < 3; index += 1) {
+      service.status(created.jobId, { renewLease: true });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
     assert.ok(['starting', 'running'].includes(service.jobs.get(created.jobId).status));
-    service.dispose('mcp_disconnected');
     const stopped = await waitFor(() => {
       const status = service.jobs.get(created.jobId);
       return status.status === 'cancelled' ? status : null;
-    });
-    assert.equal(stopped.cancellationReason, 'mcp_disconnected');
+    }, 3000);
+    assert.equal(stopped.cancellationReason, 'lease_expired');
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_BIN;
     else process.env.CLAUDE_BIN = previous;
@@ -289,7 +292,6 @@ setInterval(() => {}, 1000);
       background: true,
       leaseTimeoutMs: 1000,
     });
-    service.stopLeaseHeartbeat(created.jobId);
     assert.equal(created.persistOnDisconnect, false);
     assert.equal(created.leaseTimeoutMs, 1000);
     const finished = await waitFor(() => {

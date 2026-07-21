@@ -1,8 +1,13 @@
+import { createMotionSnapshot, diffDashboardMotion, mergeStreamJobMeta, meaningfulJobMetaEqual, sessionStatusFor, chartFingerprint, resourceRows, resourceFingerprint, resourceDirtyKeys, patchResourceRows, dashboardMeaningfulChange, createReconnectState, agentNodeRecords, agentNodeFingerprint, triggerMotion, removeAfterMotion, applyTopologyLinkGeometry, topologyLinkGeometry, shouldAnimateLinkTransition, statusClassFor, createModalMotionController } from './dashboard-motion.mjs';
+import { createDashboardScheduler } from './dashboard-scheduler.mjs';
+
 const token = document.querySelector('meta[name="dashboard-token"]').content;
 const state = {
   agents: [], jobs: [], install: null, cwd: '', selectedAgent: null, selectedJob: null,
   events: [], cursor: 0, result: null, tab: 'events', stream: null,
   streamState: 'idle', lastUpdate: null,
+  reconnect: createReconnectState(),
+  motionSnapshot: createMotionSnapshot(), chartFingerprint: '', resourceData: null, resourceFingerprint: '', resourceDimensions: {}, resourceRows: new Map(), resizeFrame: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -29,12 +34,39 @@ const elapsedFor = (job) => {
   if (job.startedAt) return Date.now() - new Date(job.startedAt);
   return Number(job.elapsedMs);
 };
-const phaseLabel = (phase, status) => ({ completed: '执行完成', failed: '执行失败', cancelled: '已取消', blocked: '已阻断', running: '正在执行', starting: '启动中', queued: '排队中' }[status] || ({ inspecting: '检查仓库', implementing: '正在实施', verifying: '验证中', finalizing: '收尾' }[phase] || '待机'));
+const phaseLabel = (phase, status) => ({ disconnected: '连接中断', completed: '执行完成', failed: '执行失败', cancelled: '已取消', blocked: '已阻断', running: '正在执行', starting: '启动中', queued: '排队中' }[status] || ({ inspecting: '检查仓库', implementing: '正在实施', verifying: '验证中', finalizing: '收尾' }[phase] || '待机'));
 const agentBadge = (id) => ({ architect: 'AR', 'backend-engineer': 'BE', 'frontend-engineer': 'FE', 'ui-designer': 'UI', 'fullstack-engineer': 'FS', 'qa-engineer': 'QA', 'security-engineer': 'SE', 'devops-engineer': 'DO' }[id] || 'AG');
 const roleClass = (id) => `role-${id}`;
-const statusClass = (status) => ['running', 'starting'].includes(status) ? 'running' : status === 'queued' ? 'queued' : ['failed', 'blocked'].includes(status) ? status : status === 'completed' ? 'completed' : '';
+const statusClass = statusClassFor;
 const statusLabel = (status) => ({ running: '运行中', starting: '启动中', queued: '排队', completed: '成功', failed: '失败', blocked: '阻断', cancelled: '取消' }[status] || '空闲');
-const statusColor = { completed: '#4cd38a', running: '#258af0', starting: '#258af0', queued: '#e9aa42', failed: '#ef5c5c', blocked: '#ef5c5c', cancelled: '#7f969f' };
+const statusColor = { completed: '#4cd38a', running: '#4cd38a', starting: '#4cd38a', queued: '#e9aa42', failed: '#ef5c5c', blocked: '#ef5c5c', cancelled: '#7f969f' };
+const motionDuration = { enter: 160, status: 800, link: 800, kpi: 320, overlay: 180 };
+const prefersReducedMotionNow = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const motionAllowed = (source) => source !== 'bootstrap' && source !== 'recovery' && !document.hidden;
+const motionElement = (selector) => document.querySelector(selector);
+const triggerIfAllowed = (element, className, duration, source) => motionAllowed(source) && !prefersReducedMotionNow() && triggerMotion(element, className, duration);
+const topologyLinkFor = (transition) => {
+  const constellation = $('#constellation');
+  const node = constellation?.querySelector(`[data-agent="${CSS.escape(String(transition.agentId))}"]`);
+  const core = constellation?.querySelector('.core-label');
+  if (!constellation || !node || !core) return null;
+  const bounds = constellation.getBoundingClientRect();
+  const coreBounds = core.getBoundingClientRect();
+  const nodeBounds = node.getBoundingClientRect();
+  const host = document.createElement('span');
+  host.className = 'topology-link';
+  host.dataset.agent = String(transition.agentId);
+  host.dataset.target = String(transition.agentId);
+  host.dataset.jobId = String(transition.jobId);
+  applyTopologyLinkGeometry(host, topologyLinkGeometry(
+    { x: coreBounds.left + coreBounds.width / 2, y: coreBounds.top + coreBounds.height / 2 },
+    { x: nodeBounds.left + nodeBounds.width / 2, y: nodeBounds.top + nodeBounds.height / 2 },
+    bounds,
+  ));
+  host.style.setProperty('--motion-link-color', statusColor[transition.to?.status] || 'var(--cyan)');
+  constellation.append(host);
+  return host;
+};
 const positions = {
   architect: [50, 12], 'backend-engineer': [80, 26], 'frontend-engineer': [87, 52], 'ui-designer': [72, 78],
   'fullstack-engineer': [50, 87], 'qa-engineer': [28, 78], 'security-engineer': [13, 52], 'devops-engineer': [20, 26],
@@ -44,10 +76,85 @@ const showToast = (message, kind = '') => {
   element.className = `toast ${kind}`;
   element.textContent = message;
   $('#toast-region').append(element);
-  setTimeout(() => element.remove(), 3600);
+  triggerMotion(element, 'motion-toast-enter', motionDuration.overlay);
+  window.setTimeout(() => removeAfterMotion(element, 'motion-toast-exit', motionDuration.overlay), 3600);
 };
 const activeJob = () => state.jobs.find((job) => job.jobId === state.selectedJob) || null;
 const jobsFor = (agent) => state.jobs.filter((job) => job.agent === agent);
+const stateSnapshotData = () => ({ agents: state.agents, jobs: state.jobs, events: state.events, alerts: state.alerts || [] });
+const deriveAlerts = () => {
+  const alerts = [];
+  state.jobs.filter((job) => ['failed', 'blocked'].includes(job.status)).slice(0, 3).forEach((job) => alerts.push({ id: `job:${job.jobId}`, critical: true, text: `${state.agents.find((agent) => agent.id === job.agent)?.name || job.agent} · ${job.task || '任务失败'}`, time: timeText(job.finishedAt || job.createdAt) }));
+  const queued = state.jobs.filter((job) => job.status === 'queued').length;
+  if (queued) alerts.push({ id: 'queued', text: `${queued} 项任务等待执行资源`, time: '实时' });
+  if (state.install && !state.install.installed) alerts.push({ id: 'install', text: 'Claude Agents 插件尚未安装', time: '设置' });
+  return alerts;
+};
+
+const motionScheduler = createDashboardScheduler({
+  requestAnimationFrame: (callback) => window.requestAnimationFrame(callback),
+  cancelAnimationFrame: (id) => window.cancelAnimationFrame(id),
+  isHidden: () => document.hidden,
+  isMeaningfulChange: dashboardMeaningfulChange,
+  render: (snapshot, source, options) => {
+    const renderSource = options.baseline ? 'recovery' : source;
+    const diff = diffDashboardMotion(state.motionSnapshot, snapshot, renderSource);
+    state.motionSnapshot = snapshot;
+    renderDashboard(snapshot, renderSource, diff, options);
+  },
+});
+
+const scheduleRender = (source = 'poll', options = {}) => {
+  const data = stateSnapshotData();
+  data.alerts = deriveAlerts();
+  return motionScheduler.schedule(createMotionSnapshot(data), source, options);
+};
+
+function scheduleResize() {
+  if (state.resizeFrame !== null) return;
+  state.resizeFrame = window.requestAnimationFrame(() => {
+    state.resizeFrame = null;
+    renderResources();
+    drawCharts();
+  });
+}
+
+function patchKeyedList(container, records, keyOf, htmlFor, emptyHtml, fingerprintOf = JSON.stringify, { updateElement = null, onCreate = null } = {}) {
+  if (!container) return;
+  if (!records.length) { container.innerHTML = emptyHtml; return; }
+  const existing = new Map([...container.children].map((child) => [child.dataset.motionKey, child]));
+  const used = new Set();
+  records.forEach((record) => {
+    const key = String(keyOf(record));
+    const fingerprint = fingerprintOf(record);
+    let element = existing.get(key);
+    if (element && element.dataset.renderFingerprint !== fingerprint) {
+      if (typeof updateElement === 'function') {
+        updateElement(element, record);
+        element.dataset.renderFingerprint = fingerprint;
+      } else {
+        const template = document.createElement('template');
+        template.innerHTML = htmlFor(record).trim();
+        const replacement = template.content.firstElementChild;
+        replacement.dataset.motionKey = key;
+        replacement.dataset.renderFingerprint = fingerprint;
+        element.replaceWith(replacement);
+        element = replacement;
+      }
+    } else if (!element) {
+      const template = document.createElement('template');
+      template.innerHTML = htmlFor(record).trim();
+      element = template.content.firstElementChild;
+      element.dataset.motionKey = key;
+      element.dataset.renderFingerprint = fingerprint;
+      container.append(element);
+      onCreate?.(element, record);
+    }
+    used.add(key);
+    container.append(element);
+  });
+  [...container.children].forEach((child) => { if (!used.has(child.dataset.motionKey)) child.remove(); });
+}
 
 function eventTool(event) {
   const content = event?.message?.content;
@@ -170,37 +277,68 @@ function drawSuccessChart() {
   });
   drawLineChart($('#success-chart'), terminal, dailyJobs().map((day) => day.label), '#4cd38a', '%');
 }
-function drawCharts() { drawDonut(); drawExecutionChart(); drawSuccessChart(); }
+function chartDimensions() {
+  return Object.fromEntries(['status-donut', 'execution-chart', 'success-chart'].map((id) => {
+    const rect = $(`#${id}`)?.getBoundingClientRect();
+    return [id, rect ? [Math.floor(rect.width), Math.floor(rect.height)] : [0, 0]];
+  }));
+}
+function drawCharts() {
+  const fingerprint = chartFingerprint(state.jobs, chartDimensions());
+  if (fingerprint === state.chartFingerprint) return;
+  state.chartFingerprint = fingerprint;
+  drawDonut(); drawExecutionChart(); drawSuccessChart();
+}
 
-function renderKpi() {
+function renderKpi(diff, source) {
   const terminal = state.jobs.filter((job) => ['completed', 'failed', 'blocked', 'cancelled'].includes(job.status));
   const completed = state.jobs.filter((job) => job.status === 'completed');
   const tokens = state.jobs.reduce((sum, job) => sum + (Number(job.inputTokens) || 0) + (Number(job.outputTokens) || 0), 0);
   const durations = terminal.map(elapsedFor).filter(Number.isFinite);
   const costs = state.jobs.map((job) => Number(job.costUsd)).filter(Number.isFinite);
-  $('#kpi-agents').textContent = state.agents.length;
-  $('#kpi-running').textContent = state.jobs.filter((job) => ['running', 'starting'].includes(job.status)).length;
-  $('#kpi-queued').textContent = state.jobs.filter((job) => job.status === 'queued').length;
-  $('#kpi-completed').textContent = completed.length;
-  $('#kpi-success').textContent = terminal.length ? `${Math.round(completed.length / terminal.length * 100)}%` : '—';
-  $('#kpi-tokens').textContent = tokens ? (tokens > 999999 ? `${(tokens / 1000000).toFixed(2)}M` : numberText(tokens)) : '—';
-  $('#kpi-duration').textContent = durations.length ? durationText(durations.reduce((sum, value) => sum + value, 0) / durations.length) : '—';
-  $('#kpi-cost').textContent = costs.length ? `$${costs.reduce((sum, value) => sum + value, 0).toFixed(2)}` : '—';
+  const values = {
+    agents: state.agents.length,
+    running: state.jobs.filter((job) => ['running', 'starting'].includes(job.status)).length,
+    queued: state.jobs.filter((job) => job.status === 'queued').length,
+    completed: completed.length,
+    success: terminal.length ? `${Math.round(completed.length / terminal.length * 100)}%` : '—',
+    tokens: tokens ? (tokens > 999999 ? `${(tokens / 1000000).toFixed(2)}M` : numberText(tokens)) : '—',
+    duration: durations.length ? durationText(durations.reduce((sum, value) => sum + value, 0) / durations.length) : '—',
+    cost: costs.length ? `$${costs.reduce((sum, value) => sum + value, 0).toFixed(2)}` : '—',
+  };
+  Object.entries(values).forEach(([key, value]) => {
+    const element = motionElement(`#kpi-${key}`);
+    if (!element) return;
+    element.textContent = value;
+    if (diff?.kpiChanges?.some((change) => change.key === key)) triggerIfAllowed(element, 'motion-kpi-change', motionDuration.kpi, source);
+  });
 }
 function renderLoad() {
   const usage = state.agents.map((agent) => ({ agent, count: jobsFor(agent.id).length })).sort((a, b) => b.count - a.count || a.agent.name.localeCompare(b.agent.name, 'zh-CN'));
   const max = Math.max(1, ...usage.map((item) => item.count));
-  $('#agent-load-list').innerHTML = usage.map(({ agent, count }, index) => `<div class="load-row"><span class="load-rank">${index + 1}</span><span class="load-name">${esc(agent.name)}</span><span class="load-track"><i style="width:${Math.round(count / max * 100)}%"></i></span><span class="load-value">${count}</span></div>`).join('') || '<div class="empty-row">暂无智能体数据</div>';
+  patchKeyedList($('#agent-load-list'), usage, ({ agent }) => agent.id, ({ agent, count }, index) => `<div class="load-row"><span class="load-rank">${index + 1}</span><span class="load-name">${esc(agent.name)}</span><span class="load-track"><i style="width:${Math.round(count / max * 100)}%"></i></span><span class="load-value">${count}</span></div>`, '<div class="empty-row">暂无智能体数据</div>');
 }
 function renderRecent() {
   const jobs = [...state.jobs].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 8);
-  $('#recent-list').innerHTML = jobs.length ? jobs.map((job) => `<button class="recent-row" data-job="${esc(job.jobId)}"><i class="recent-dot ${statusClass(job.status)}"></i><span class="recent-task">${esc(job.task || '未命名任务')}</span><span class="recent-agent">${esc(state.agents.find((agent) => agent.id === job.agent)?.name || job.agent || '—')}</span><time class="recent-time">${esc(timeText(job.createdAt))}</time></button>`).join('') : '<div class="empty-row">暂无任务记录</div>';
+  patchKeyedList($('#recent-list'), jobs, (job) => job.jobId, (job) => `<button class="recent-row" data-job="${esc(job.jobId)}"><i class="recent-dot ${statusClass(job.status)}"></i><span class="recent-task">${esc(job.task || '未命名任务')}</span><span class="recent-agent">${esc(state.agents.find((agent) => agent.id === job.agent)?.name || job.agent || '—')}</span><time class="recent-time">${esc(timeText(job.createdAt))}</time></button>`, '<div class="empty-row">暂无任务记录</div>');
 }
-function renderNodes() {
-  $('#agent-nodes').innerHTML = state.agents.map((agent) => {
-    const jobs = jobsFor(agent.id); const current = jobs.find((job) => ['running', 'starting', 'queued'].includes(job.status)) || jobs[0]; const status = current?.status || 'idle'; const [x, y] = positions[agent.id] || [50, 50];
-    return `<button class="agent-node" data-agent="${esc(agent.id)}" data-state="${statusClass(status)}" style="left:${x}%;top:${y}%" title="查看${esc(agent.name)}会话"><span class="role-icon ${roleClass(agent.id)}"></span><span class="agent-node-copy"><strong>${esc(agent.name)}</strong><small class="${statusClass(status)}">${esc(statusLabel(status))}${current?.task ? ` · ${esc(current.task)}` : ''}</small></span></button>`;
-  }).join('');
+function renderNodes(diff, source) {
+  const records = agentNodeRecords(state.agents, state.jobs);
+  const transitions = new Map((diff?.agentTransitions || []).map((transition) => [String(transition.id), transition]));
+  patchKeyedList($('#agent-nodes'), records, (record) => record.agent.id, (record) => {
+    const { agent, status, task } = record; const [x, y] = positions[agent.id] || [50, 50];
+    return `<button class="agent-node" data-agent="${esc(agent.id)}" data-state="${statusClass(status)}" style="left:${x}%;top:${y}%" title="查看${esc(agent.name)}会话"><span class="role-icon ${roleClass(agent.id)}"></span><span class="agent-node-copy"><strong>${esc(agent.name)}</strong><small class="${statusClass(status)}">${esc(statusLabel(status))}${task ? ` · ${esc(task)}` : ''}</small></span></button>`;
+  }, '<div class="empty-row">暂无智能体数据</div>', agentNodeFingerprint, {
+    updateElement: (element, record) => {
+      const { agent, status, task } = record;
+      element.dataset.state = statusClass(status);
+      const label = element.querySelector('.agent-node-copy small');
+      if (label) { label.className = statusClass(status); label.textContent = `${statusLabel(status)}${task ? ` · ${task}` : ''}`; }
+    },
+  });
+  transitions.forEach((transition, id) => {
+    triggerIfAllowed(motionElement(`#agent-nodes [data-agent="${CSS.escape(id)}"]`), 'motion-status-ring', motionDuration.status, source);
+  });
 }
 function sparkValues(index, base) {
   const values = []; const source = state.jobs.filter((job) => job.agent === state.agents[index % Math.max(1, state.agents.length)]?.id).length;
@@ -211,36 +349,66 @@ function drawSpark(canvas, values, color) {
   const surface = clearCanvas(canvas, '#071117'); if (!surface) return; const { ctx, width, height } = surface; const max = Math.max(...values, 1); const step = width / Math.max(1, values.length - 1);
   ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.shadowColor = color; ctx.shadowBlur = 5; ctx.beginPath(); values.forEach((value, index) => { const x = index * step; const y = height - 3 - (value / max) * (height - 8); index ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke(); ctx.shadowBlur = 0;
 }
-function renderResources() {
-  const running = state.jobs.filter((job) => ['running', 'starting'].includes(job.status)).length;
-  const terminal = state.jobs.filter((job) => ['completed', 'failed', 'blocked', 'cancelled'].includes(job.status));
-  const eventCount = state.events.length;
-  const rows = [
-    ['并发任务', `${running}/${state.agents.length || 0}`, running, '#4cd38a'],
-    ['事件记录', `${eventCount}`, eventCount, '#34b9ee'],
-    ['验证覆盖', terminal.length ? `${Math.round(terminal.filter((job) => job.verificationState).length / terminal.length * 100)}%` : '—', terminal.length ? terminal.filter((job) => job.verificationState).length : 0, '#e9aa42'],
-    ['Token 记录', state.jobs.some((job) => Number(job.inputTokens) || Number(job.outputTokens)) ? '已记录' : '等待记录', state.jobs.filter((job) => Number(job.inputTokens) || Number(job.outputTokens)).length, '#9277e8'],
-  ];
-  $('#resource-list').innerHTML = rows.map(([label, value, base, color], index) => `<div class="resource-row"><span class="resource-ring" style="border-color:${color};color:${color}">${esc(value)}</span><span class="resource-copy"><small>${esc(label)}</small><b>${esc(value)}</b></span><canvas class="resource-spark" data-spark="${index}"></canvas></div>`).join('');
-  document.querySelectorAll('.resource-spark').forEach((canvas, index) => drawSpark(canvas, sparkValues(index, Number(rows[index][2]) || 1), rows[index][3]));
+function resourceDimensions() {
+  return Object.fromEntries([...document.querySelectorAll('.resource-spark')].map((canvas) => [canvas.dataset.resourceKey, [Math.floor(canvas.getBoundingClientRect().width), Math.floor(canvas.getBoundingClientRect().height)]]));
 }
-function renderAlerts() {
+
+function renderResources() {
+  const data = { agents: state.agents, jobs: state.jobs, events: state.events };
+  const rows = resourceRows(data);
+  const nextRows = new Map(rows.map((row) => [row.key, row]));
+  const dimensionsBefore = state.resourceDimensions;
+  const list = $('#resource-list');
+  const dirtyKeys = state.resourceData === null
+    ? new Set(rows.map((row) => row.key))
+    : resourceDirtyKeys(state.resourceData, data, dimensionsBefore, resourceDimensions());
+  patchResourceRows(list, rows, dirtyKeys, {
+    createRow: (row) => {
+      const template = document.createElement('template');
+      template.innerHTML = `<div class="resource-row" data-resource-key="${esc(row.key)}"><span class="resource-ring"></span><span class="resource-copy"><small></small><b></b></span><canvas class="resource-spark" data-resource-key="${esc(row.key)}"></canvas></div>`;
+      return template.content.firstElementChild;
+    },
+    updateRow: (element, row) => {
+      const ring = element.querySelector('.resource-ring');
+      const label = element.querySelector('.resource-copy small');
+      const value = element.querySelector('.resource-copy b');
+      if (ring) { ring.style.borderColor = row.color; ring.style.color = row.color; ring.textContent = row.value; }
+      if (label) label.textContent = row.label;
+      if (value) value.textContent = row.value;
+    },
+  });
+  const dimensionsAfter = resourceDimensions();
+  const resizedKeys = state.resourceData === null ? [] : resourceDirtyKeys(state.resourceData, data, dimensionsBefore, dimensionsAfter);
+  const drawKeys = new Set([...dirtyKeys, ...resizedKeys]);
+  document.querySelectorAll('.resource-spark').forEach((canvas) => {
+    const key = canvas.dataset.resourceKey;
+    const row = nextRows.get(key);
+    if (row && drawKeys.has(key)) drawSpark(canvas, row.sparkValues, row.color);
+  });
+  state.resourceData = { agents: [...state.agents], jobs: [...state.jobs], events: [...state.events] };
+  state.resourceRows = nextRows;
+  state.resourceDimensions = dimensionsAfter;
+  state.resourceFingerprint = resourceFingerprint(data, dimensionsAfter);
+}
+function renderAlerts(diff, source) {
   const alerts = [];
-  state.jobs.filter((job) => ['failed', 'blocked'].includes(job.status)).slice(0, 3).forEach((job) => alerts.push({ critical: true, text: `${state.agents.find((agent) => agent.id === job.agent)?.name || job.agent} · ${job.task || '任务失败'}`, time: timeText(job.finishedAt || job.createdAt) }));
+  state.jobs.filter((job) => ['failed', 'blocked'].includes(job.status)).slice(0, 3).forEach((job) => alerts.push({ id: `job:${job.jobId}`, critical: true, text: `${state.agents.find((agent) => agent.id === job.agent)?.name || job.agent} · ${job.task || '任务失败'}`, time: timeText(job.finishedAt || job.createdAt) }));
   const queued = state.jobs.filter((job) => job.status === 'queued').length;
-  if (queued) alerts.push({ text: `${queued} 项任务等待执行资源`, time: '实时' });
-  if (state.install && !state.install.installed) alerts.push({ text: 'Claude Agents 插件尚未安装', time: '设置' });
+  if (queued) alerts.push({ id: 'queued', text: `${queued} 项任务等待执行资源`, time: '实时' });
+  if (state.install && !state.install.installed) alerts.push({ id: 'install', text: 'Claude Agents 插件尚未安装', time: '设置' });
+  state.alerts = alerts;
   $('#alert-count').textContent = `${alerts.length} 条`;
-  $('#alert-list').innerHTML = alerts.length ? alerts.map((alert) => `<div class="alert-row ${alert.critical ? 'critical' : ''}"><span class="alert-level">${alert.critical ? '!' : 'i'}</span><span>${esc(alert.text)}</span><time>${esc(alert.time)}</time></div>`).join('') : '<div class="empty-row">系统运行正常</div>';
+  patchKeyedList($('#alert-list'), alerts, (alert) => alert.id, (alert) => `<div class="alert-row ${alert.critical ? 'critical' : ''}"><span class="alert-level">${alert.critical ? '!' : 'i'}</span><span>${esc(alert.text)}</span><time>${esc(alert.time)}</time></div>`, '<div class="empty-row">系统运行正常</div>');
+  if (motionAllowed(source)) (diff?.alertChanges || []).forEach(({ id }) => triggerMotion(motionElement(`#alert-list [data-motion-key="${CSS.escape(String(id))}"]`), 'motion-alert-enter', motionDuration.enter));
 }
 function renderPulse() {
   const recentEvents = state.events.slice(-8).reverse();
   if (recentEvents.length) {
-    $('#pulse-list').innerHTML = recentEvents.map((event) => { const [kind, icon, detail] = eventView(event); return `<div class="pulse-row"><time>${esc(timeText(event.at))}</time><i></i><b>${esc(kind)}</b><span>${esc(detail)}</span><em>${esc(icon)}</em></div>`; }).join('');
+    patchKeyedList($('#pulse-list'), recentEvents, (event) => event.seq, (event) => { const [kind, icon, detail] = eventView(event); return `<div class="pulse-row"><time>${esc(timeText(event.at))}</time><i></i><b>${esc(kind)}</b><span>${esc(detail)}</span><em>${esc(icon)}</em></div>`; }, '<div class="empty-row">等待事件流</div>');
     return;
   }
   const jobs = [...state.jobs].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 8);
-  $('#pulse-list').innerHTML = jobs.length ? jobs.map((job) => `<div class="pulse-row"><time>${esc(timeText(job.createdAt))}</time><i></i><b>${esc(state.agents.find((agent) => agent.id === job.agent)?.name || job.agent || '任务')}</b><span>${esc(job.task || phaseLabel(job.phase, job.status))}</span><em>${esc(statusLabel(job.status))}</em></div>`).join('') : '<div class="empty-row">等待事件流</div>';
+  patchKeyedList($('#pulse-list'), jobs, (job) => `job:${job.jobId}`, (job) => `<div class="pulse-row"><time>${esc(timeText(job.createdAt))}</time><i></i><b>${esc(state.agents.find((agent) => agent.id === job.agent)?.name || job.agent || '任务')}</b><span>${esc(job.task || phaseLabel(job.phase, job.status))}</span><em>${esc(statusLabel(job.status))}</em></div>`, '<div class="empty-row">等待事件流</div>');
 }
 function renderFooter() {
   const connected = state.streamState === 'open' || state.streamState === 'snapshot' || state.lastUpdate;
@@ -252,8 +420,26 @@ function renderFooter() {
   $('#data-freshness').textContent = state.lastUpdate ? nowText(state.lastUpdate) : '等待连接';
   $('#core-throughput').textContent = `${state.events.length} events`;
 }
+function renderDashboard(snapshot, source, diff, options = {}) {
+  const renderSource = options.baseline ? 'recovery' : source;
+  renderKpi(diff, renderSource); renderLoad(); renderRecent(); renderNodes(diff, renderSource); renderResources(); renderAlerts(diff, renderSource); renderPulse(); renderFooter();
+  drawCharts();
+  if (state.selectedJob && document.querySelector('#session-modal:not(.hidden)')) renderSession(diff, renderSource);
+  if (motionAllowed(renderSource)) {
+    (diff?.linkTransitions || []).forEach((transition) => {
+      if (!shouldAnimateLinkTransition(transition, {
+        source: renderSource,
+        selectedJobId: state.selectedJob,
+        hasNewEvent: Boolean(diff?.newEvents?.length),
+      })) return;
+      const link = topologyLinkFor(transition);
+      if (link) triggerMotion(link, 'motion-link-travel', motionDuration.link, { onCleanup: () => link.remove() });
+    });
+  }
+}
+
 function renderAll() {
-  renderKpi(); renderLoad(); renderRecent(); renderNodes(); renderResources(); renderAlerts(); renderPulse(); renderFooter(); drawCharts();
+  scheduleRender('interaction', { force: true });
 }
 
 function renderConfigOptions() {
@@ -274,9 +460,35 @@ function renderInstall() {
   $('#install-output').textContent = installed ? `当前版本 ${state.install.installedVersion || '已安装'}，可检查 marketplace 更新。` : '尚未安装，可从此界面完成安装。';
 }
 
+const modalMotion = createModalMotionController({
+  duration: motionDuration.overlay,
+  reducedMotionFn: prefersReducedMotionNow,
+});
 let modalTrigger = null;
-function openModal(id) { modalTrigger = document.activeElement; const modal = $(`#${id}`); modal.classList.remove('hidden'); modal.querySelector('button, input, select, textarea')?.focus(); }
-function closeModal(id) { $(`#${id}`)?.classList.add('hidden'); modalTrigger?.focus?.(); }
+const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+function openModal(id) {
+  modalTrigger = document.activeElement;
+  const backdrop = $(`#${id}`); const modal = backdrop?.querySelector('.modal');
+  if (!backdrop || !modal) return;
+  backdrop.classList.remove('hidden');
+  modalMotion.open(backdrop, modal);
+  modal.querySelector(focusableSelector)?.focus();
+}
+function closeModal(id) {
+  const backdrop = $(`#${id}`); const modal = backdrop?.querySelector('.modal');
+  if (!backdrop || !modal || backdrop.classList.contains('hidden')) return;
+  modalMotion.close(backdrop, modal, () => { backdrop.classList.add('hidden'); modalTrigger?.focus?.(); modalTrigger = null; });
+}
+function trapModalFocus(event) {
+  if (event.key !== 'Tab') return;
+  const modal = document.querySelector('.modal-backdrop:not(.hidden) .modal');
+  if (!modal) return;
+  const items = [...modal.querySelectorAll(focusableSelector)];
+  if (!items.length) return;
+  const first = items[0]; const last = items.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+}
 function openSettings(tab = 'agent') {
   document.querySelectorAll('.settings-tab').forEach((button) => button.classList.toggle('active', button.dataset.settingsTab === tab));
   document.querySelectorAll('.settings-pane').forEach((pane) => pane.classList.toggle('active', pane.dataset.settingsPane === tab));
@@ -286,8 +498,8 @@ function filteredEvents() {
   if (state.tab === 'events') return state.events;
   return state.events.filter((event) => { const kind = eventClass(event); return state.tab === 'tools' ? Boolean(kind.tool) : state.tab === 'files' ? kind.file : kind.check; });
 }
-function renderSession() {
-  const agent = state.agents.find((item) => item.id === state.selectedAgent); const job = activeJob(); const status = job?.status || 'idle'; const config = agent?.configured || {};
+function renderSession(diff, source) {
+  const agent = state.agents.find((item) => item.id === state.selectedAgent); const job = activeJob(); const status = sessionStatusFor(job?.status, state.streamState); const config = agent?.configured || {};
   $('#session-role-icon').className = `session-role-icon ${roleClass(agent?.id || '')}`; $('#session-title').textContent = agent?.name || '智能体会话'; $('#session-task').textContent = job?.task || '该智能体暂无任务记录'; $('#session-meta').textContent = job ? `${job.sessionId || '无会话 ID'} · ${job.cwd || '当前仓库'}` : '点击星图节点查看会话详情';
   $('#session-state').dataset.status = status; $('#session-state').innerHTML = `<i></i><span>${esc(phaseLabel(job?.phase, status))}</span>`;
   const result = state.result || {}; const verification = job?.verificationState; const title = { completed: '任务已完成', failed: '任务执行失败', cancelled: '任务已取消', blocked: '任务已阻断', running: '任务正在执行', starting: '正在启动任务', queued: '任务正在排队' }[status] || '等待任务';
@@ -296,7 +508,8 @@ function renderSession() {
   $('#overview-status').textContent = phaseLabel(job?.phase, status); $('#overview-duration').textContent = durationText(elapsedFor(job)); $('#overview-check').textContent = verification === 'passed' ? '验证通过' : verification === 'failed' ? '验证失败' : job ? '尚未验证' : '等待执行'; $('#overview-cost').textContent = Number.isFinite(Number(job?.costUsd)) ? `$${Number(job.costUsd).toFixed(4)}` : '—';
   $('#session-runtime').textContent = `模型 ${config.model || '—'} · 思考强度 ${config.effort || '—'} · 权限 ${config.permissionMode || '—'}`;
   const visible = filteredEvents(); $('#event-count').textContent = state.events.length; $('#tool-count').textContent = state.events.filter((event) => eventClass(event).tool).length; $('#file-count').textContent = state.events.filter((event) => eventClass(event).file).length; $('#check-count').textContent = state.events.filter((event) => eventClass(event).check).length;
-  $('#event-viewport').innerHTML = visible.length ? visible.map((event) => { const [kind, icon, detail] = eventView(event); return `<div class="event-row"><span class="event-time">${esc(timeText(event.at))}</span><span class="event-dot">${esc(icon)}</span><span class="event-kind">${esc(kind)}</span><span class="event-main"><strong>${esc(event.subtype || kind)}</strong><small>${esc(detail)}</small></span><span class="event-result">${event.type === 'result' ? '完成' : ''}</span></div>`; }).join('') : '<div class="empty-events"><strong>此分类暂无记录</strong><small>历史快照可能没有完整事件流。</small></div>';
+  patchKeyedList($('#event-viewport'), visible, (event) => event.seq, (event) => { const [kind, icon, detail] = eventView(event); return `<div class="event-row"><span class="event-time">${esc(timeText(event.at))}</span><span class="event-dot">${esc(icon)}</span><span class="event-kind">${esc(kind)}</span><span class="event-main"><strong>${esc(event.subtype || kind)}</strong><small>${esc(detail)}</small></span><span class="event-result">${event.type === 'result' ? '完成' : ''}</span></div>`; }, '<div class="empty-events"><strong>此分类暂无记录</strong><small>历史快照可能没有完整事件流。</small></div>');
+  if (motionAllowed(source)) (diff?.newEvents || []).forEach((event) => triggerMotion(motionElement(`#event-viewport [data-motion-key="${CSS.escape(String(event.seq))}"]`), 'motion-event-enter', motionDuration.enter));
   $('#stream-status').textContent = state.streamState === 'open' ? 'SSE 已连接' : state.streamState === 'error' ? 'SSE 已中断' : state.selectedJob ? '历史快照' : '未连接';
 }
 async function selectJob(jobId, open = false) {
@@ -307,7 +520,8 @@ async function selectJob(jobId, open = false) {
     if (data.meta?.resultAvailable) { try { const result = await api(`/api/jobs/${encodeURIComponent(job.jobId)}/result`); state.result = result.result || null; } catch { state.result = null; } }
     state.lastUpdate = new Date().toISOString(); connectStream(job.status === 'running' || job.status === 'starting' ? job.jobId : null);
   } else closeStream();
-  renderAll(); if (open) { renderSession(); openModal('session-modal'); }
+  scheduleRender('interaction', { force: true });
+  if (open) { renderSession(); openModal('session-modal'); }
 }
 async function selectAgent(agentId, open = true) {
   state.selectedAgent = agentId; const latest = jobsFor(agentId).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0]; await selectJob(latest?.jobId || null, open);
@@ -315,38 +529,49 @@ async function selectAgent(agentId, open = true) {
 function closeStream() { if (state.stream) state.stream.close(); state.stream = null; state.streamState = 'idle'; }
 function connectStream(jobId) {
   closeStream(); if (!jobId) return;
-  state.streamState = 'connecting'; state.stream = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/stream?token=${encodeURIComponent(token)}&after=${state.cursor}`);
-  state.stream.onopen = () => { state.streamState = 'open'; renderFooter(); renderSession(); };
+  state.streamState = 'connecting'; scheduleRender('interaction', { force: true }); state.stream = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/stream?token=${encodeURIComponent(token)}&after=${state.cursor}`);
+  state.stream.onopen = () => { state.reconnect.onOpen(); state.streamState = 'open'; scheduleRender('sse', { force: true }); };
   state.stream.onmessage = (message) => {
     try {
-      const data = JSON.parse(message.data); if (jobId !== state.selectedJob) return; const known = new Set(state.events.map((event) => event.seq)); state.events.push(...(data.events || []).filter((event) => !known.has(event.seq))); state.cursor = data.cursor; state.jobs = state.jobs.map((item) => item.jobId === jobId ? data.meta : item); state.lastUpdate = new Date().toISOString(); renderAll(); if (document.querySelector('#session-modal:not(.hidden)')) renderSession();
-      if (!['running', 'starting', 'queued'].includes(data.meta?.status)) closeStream();
+      const data = JSON.parse(message.data); if (jobId !== state.selectedJob) return;
+      const incomingEvents = Array.isArray(data.events) ? data.events : [];
+      const known = new Set(state.events.map((event) => event.seq));
+      const newEvents = incomingEvents.filter((event) => !known.has(event.seq));
+      const currentJob = state.jobs.find((item) => item.jobId === jobId);
+      const nextJob = mergeStreamJobMeta(currentJob, data.meta);
+      const metadataChanged = !meaningfulJobMetaEqual(currentJob, nextJob);
+      const renderSource = state.reconnect.peekSource('sse');
+      if (!newEvents.length && !metadataChanged) return;
+      state.reconnect.commitSource('sse');
+      state.events.push(...newEvents); state.cursor = data.cursor; state.jobs = state.jobs.map((item) => item.jobId === jobId ? nextJob : item); state.lastUpdate = new Date().toISOString();
+      scheduleRender(renderSource.source, renderSource.baseline ? { baseline: true } : undefined);
+      if (!['running', 'starting', 'queued'].includes(nextJob?.status)) closeStream();
     } catch (error) { showToast(error.message, 'error'); }
   };
-  state.stream.onerror = () => { if (state.streamState !== 'snapshot') state.streamState = 'error'; renderFooter(); if (document.querySelector('#session-modal:not(.hidden)')) renderSession(); };
+  state.stream.onerror = () => { state.reconnect.onError(); if (state.streamState !== 'snapshot') state.streamState = 'error'; scheduleRender('sse', { force: true }); };
 }
-async function refreshBootstrap() {
+async function refreshBootstrap(source = 'poll') {
   const data = await api('/api/bootstrap'); state.agents = data.agents || []; state.jobs = Array.isArray(data.jobs) ? data.jobs : []; state.cwd = data.cwd || ''; state.install = data.installation || null;
   if (!state.selectedAgent || !state.agents.some((agent) => agent.id === state.selectedAgent)) state.selectedAgent = state.agents[0]?.id || null;
   if (state.selectedJob && !state.jobs.some((job) => job.jobId === state.selectedJob)) state.selectedJob = null;
-  renderConfigOptions(); renderAll(); renderInstall();
+  renderConfigOptions(); renderInstall(); scheduleRender(source);
   if (!state.selectedJob) { const active = state.jobs.find((job) => ['running', 'starting'].includes(job.status)); if (active) { state.selectedAgent = active.agent; state.selectedJob = active.jobId; connectStream(active.jobId); } }
 }
 async function install() {
   $('#install-run').disabled = true; $('#install-output').textContent = '正在调用 Codex CLI…';
-  try { const result = await post('/api/install', {}); state.install = result.installation || state.install; renderInstall(); $('#install-output').textContent = [result.marketplace?.stdout, result.marketplace?.stderr, result.plugin?.stdout, result.plugin?.stderr].filter(Boolean).join('\n') || '插件安装或更新检查完成。'; showToast('插件状态已更新，重启 Codex 后新任务即可加载。', 'success'); await refreshBootstrap(); } catch (error) { $('#install-output').textContent = error.message; showToast(error.message, 'error'); } finally { $('#install-run').disabled = !state.install?.codexAvailable; }
+  try { const result = await post('/api/install', {}); state.install = result.installation || state.install; renderInstall(); $('#install-output').textContent = [result.marketplace?.stdout, result.marketplace?.stderr, result.plugin?.stdout, result.plugin?.stderr].filter(Boolean).join('\n') || '插件安装或更新检查完成。'; showToast('插件状态已更新，重启 Codex 后新任务即可加载。', 'success'); await refreshBootstrap('interaction'); } catch (error) { $('#install-output').textContent = error.message; showToast(error.message, 'error'); } finally { $('#install-run').disabled = !state.install?.codexAvailable; }
 }
 async function saveConfig() {
   const values = { model: $('#cfg-model').value.trim(), effort: $('#cfg-effort').value, permissionMode: $('#cfg-permission').value, outputFormat: $('#cfg-output').value, timeoutMs: $('#cfg-timeout').value, maxBudgetUsd: $('#cfg-budget').value, gatewayUrl: $('#cfg-gateway').value.trim(), apiKeyKind: $('#cfg-key-kind').value, browserMcpConfigsJson: $('#cfg-browser-profiles').value.trim() || '{}' };
   if ($('#cfg-api-key').value) values.apiKey = $('#cfg-api-key').value;
-  try { await post('/api/config', { agent: $('#config-agent').value, values }); showToast('配置已保存到 SQLite，并将用于后续任务。', 'success'); await refreshBootstrap(); } catch (error) { showToast(error.message, 'error'); }
+  try { await post('/api/config', { agent: $('#config-agent').value, values }); showToast('配置已保存到 SQLite，并将用于后续任务。', 'success'); await refreshBootstrap('interaction'); } catch (error) { showToast(error.message, 'error'); }
 }
 
 $('#settings-open').addEventListener('click', () => openSettings('agent'));
 $('#config-agent').addEventListener('change', fillConfig);
 $('#config-save').addEventListener('click', saveConfig);
 $('#install-run').addEventListener('click', install);
-$('#recent-refresh').addEventListener('click', () => refreshBootstrap().catch((error) => showToast(error.message, 'error')));
+$('#recent-refresh').addEventListener('click', () => refreshBootstrap('interaction').catch((error) => showToast(error.message, 'error')));
 $('#pulse-more').addEventListener('click', () => state.selectedJob ? (renderSession(), openModal('session-modal')) : showToast('当前没有可查看的会话记录。'));
 $('#refresh-events').addEventListener('click', () => selectJob(state.selectedJob, true).catch((error) => showToast(error.message, 'error')));
 document.querySelectorAll('.settings-tab').forEach((button) => button.addEventListener('click', () => openSettings(button.dataset.settingsTab)));
@@ -355,9 +580,16 @@ $('#agent-nodes').addEventListener('click', (event) => { const node = event.targ
 $('#recent-list').addEventListener('click', (event) => { const row = event.target.closest('[data-job]'); if (!row) return; selectJob(row.dataset.job, true).catch((error) => showToast(error.message, 'error')); });
 document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => closeModal(button.dataset.close)));
 document.querySelectorAll('.modal-backdrop').forEach((backdrop) => backdrop.addEventListener('click', (event) => { if (event.target === backdrop) closeModal(backdrop.id); }));
-document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { const modal = document.querySelector('.modal-backdrop:not(.hidden)'); if (modal) closeModal(modal.id); } });
-window.addEventListener('resize', drawCharts);
+document.addEventListener('keydown', (event) => {
+  trapModalFocus(event);
+  if (event.key === 'Escape') { const modal = document.querySelector('.modal-backdrop:not(.hidden)'); if (modal) closeModal(modal.id); }
+});
+document.addEventListener('visibilitychange', () => {
+  document.documentElement.classList.toggle('document-hidden', document.hidden);
+  if (!document.hidden) motionScheduler.restoreVisible();
+});
+window.addEventListener('resize', scheduleResize);
 setInterval(() => { $('#clock').textContent = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-'); }, 1000);
-setInterval(() => refreshBootstrap().catch(() => { state.streamState = 'error'; renderFooter(); }), 5000);
+setInterval(() => refreshBootstrap('poll').catch(() => { state.streamState = 'error'; scheduleRender('poll', { force: true }); }), 5000);
 $('#clock').textContent = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-');
-refreshBootstrap().catch((error) => showToast(error.message, 'error'));
+refreshBootstrap('bootstrap').catch((error) => showToast(error.message, 'error'));

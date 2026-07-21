@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolveAgent } from './lib/agents.mjs';
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.png': 'image/png' };
 const MAX_BODY_BYTES = 256 * 1024;
 const MARKETPLACE_NAME = 'local-claude-code-agents';
 const PLUGIN_SELECTOR = `claude-code-agents@${MARKETPLACE_NAME}`;

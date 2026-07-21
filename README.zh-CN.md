@@ -250,7 +250,7 @@ browserMode, browserMcpProfile
 
 ### 后台任务
 
-正常编排使用 `background=true`。调用会返回 Job ID 和自适应的 `nextPollSeconds`，Codex 通过 `job_status` 获取紧凑进度，并在终态时调用一次 `job_result`。
+正常编排使用 `background=true`。调用会返回 Job ID 和自适应的 `nextPollSeconds`，Codex 通过 `job_status` 获取紧凑进度并续租非持久任务，在终态时调用一次 `job_result`；停止轮询后租约会过期并终止 Worker。
 
 只有用户明确要求单次阻塞等待且不显示进度时，才使用 `background=false`。只有用户明确要求任务脱离 Codex 会话继续运行时，才使用 `persistOnDisconnect=true`。
 

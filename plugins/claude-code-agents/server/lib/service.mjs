@@ -14,7 +14,7 @@ const DEFAULT_RESULT_TEXT_CHARS = 8000;
 const MAX_COMPACT_RESULT_BYTES = 8192;
 const MAX_COMPACT_STATUS_BYTES = 2048;
 const MAX_COMPACT_STATUS_LIST_BYTES = 8192;
-const DEFAULT_BACKGROUND_LEASE_MS = 90_000;
+const DEFAULT_BACKGROUND_LEASE_MS = 300_000;
 const ACTIVE_JOB_STATUSES = new Set(['starting', 'running', 'queued']);
 const POLL_SCHEDULE_SECONDS = [30, 60, 120, 180];
 const TRUNCATION_MARKER = '\n[输出已截断]';
@@ -266,29 +266,6 @@ export class ClaudeAgentService {
     this.jobs = new JobStore(dataRoot);
     this.config = new ConfigStore(dataRoot);
     this.ownedJobs = new Set();
-    this.leaseTimers = new Map();
-  }
-
-  startLeaseHeartbeat(jobId, leaseTimeoutMs) {
-    const intervalMs = Math.min(5000, Math.max(250, Math.floor(leaseTimeoutMs / 3)));
-    const timer = setInterval(() => {
-      try {
-        const meta = this.jobs.renewLease(jobId);
-        if (!ACTIVE_JOB_STATUSES.has(meta.status)) {
-          this.stopLeaseHeartbeat(jobId);
-          this.ownedJobs.delete(jobId);
-        }
-      }
-      catch { this.stopLeaseHeartbeat(jobId); }
-    }, intervalMs);
-    timer.unref?.();
-    this.leaseTimers.set(jobId, timer);
-  }
-
-  stopLeaseHeartbeat(jobId) {
-    const timer = this.leaseTimers.get(jobId);
-    if (timer) clearInterval(timer);
-    this.leaseTimers.delete(jobId);
   }
 
   runtimeFor(agent, cwd, overrides = {}) {
@@ -359,7 +336,8 @@ export class ClaudeAgentService {
       });
       this.jobs.writeMeta(meta.jobId, { pid: child.pid });
       this.ownedJobs.add(meta.jobId);
-      if (!persistOnDisconnect) this.startLeaseHeartbeat(meta.jobId, leaseTimeoutMs);
+      child.once('exit', () => this.ownedJobs.delete(meta.jobId));
+      child.once('error', () => this.ownedJobs.delete(meta.jobId));
       child.unref();
       return {
         ok: true,
@@ -423,8 +401,15 @@ export class ClaudeAgentService {
     return stored;
   }
 
-  status(jobId, { full = false, limit = 5, sinceRevision, pollAttempt = 0 } = {}) {
-    const value = jobId ? this.jobs.get(jobId) : this.jobs.list(limit);
+  status(jobId, { full = false, limit = 5, sinceRevision, pollAttempt = 0, renewLease = false } = {}) {
+    let value;
+    if (jobId) {
+      if (renewLease) {
+        const current = this.jobs.get(jobId);
+        if (ACTIVE_JOB_STATUSES.has(current.status) && !current.persistOnDisconnect) this.jobs.renewLease(jobId);
+      }
+      value = this.jobs.get(jobId);
+    } else value = this.jobs.list(limit);
     if (full) return value;
     if (Array.isArray(value)) return capStatusList(value.map((meta) => compactMeta({ ...meta, ...pollStatus(meta, { sinceRevision, pollAttempt }) })));
     return compactMeta({ ...value, ...pollStatus(value, { sinceRevision, pollAttempt }) });
@@ -469,7 +454,6 @@ export class ClaudeAgentService {
     for (const jobId of this.ownedJobs) {
       try {
         const meta = this.jobs.get(jobId);
-        this.stopLeaseHeartbeat(jobId);
         if (!meta.persistOnDisconnect && ACTIVE_JOB_STATUSES.has(meta.status)) {
           if (meta.pid) this.cancel(jobId, reason);
           else this.jobs.writeMeta(jobId, { status: 'cancelled', finishedAt: new Date().toISOString(), cancellationReason: reason });

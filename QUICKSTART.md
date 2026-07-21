@@ -76,7 +76,7 @@ claude -p
 按上面的计划启用后端工程师智能体后台执行。
 ```
 
-插件返回 job ID 后，Codex 按 `nextPollSeconds` 使用 `job_status`，并在终态调用一次 `job_result`；用户也可使用 `job_cancel`。后台租约由 MCP 服务心跳维护，MCP 断开时非持久任务会被取消，Worker 保留租约过期兜底。
+插件返回 job ID 后，Codex 按 `nextPollSeconds` 使用 `job_status`，并在终态调用一次 `job_result`；`job_status` 会续租非持久后台任务，停止轮询后租约过期并终止 Worker；用户也可使用 `job_cancel`。MCP 断开时服务会立即取消其拥有的非持久任务。
 
 只有明确需要任务脱离 Codex 继续运行时，才要求使用 `persistOnDisconnect=true`。普通任务不要启用持久模式。
 

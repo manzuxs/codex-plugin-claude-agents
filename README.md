@@ -249,7 +249,7 @@ browserMode, browserMcpProfile
 
 ### Background jobs
 
-Normal orchestration uses `background=true`. The call returns a job ID and an adaptive `nextPollSeconds` hint. Codex reads compact progress with `job_status` and retrieves the terminal result once with `job_result`.
+Normal orchestration uses `background=true`. The call returns a job ID and an adaptive `nextPollSeconds` hint. Codex reads compact progress with `job_status`, which also renews non-persistent jobs, and retrieves the terminal result once with `job_result`; stopping polls lets the lease expire and terminate the worker.
 
 Use `background=false` when the user explicitly requests a single blocking wait with no progress polling. Use `persistOnDisconnect=true` only when the user explicitly wants the job to survive the Codex session.
 

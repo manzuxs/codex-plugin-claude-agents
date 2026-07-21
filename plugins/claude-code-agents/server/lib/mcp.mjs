@@ -34,7 +34,7 @@ const TOOL_DEFINITIONS = [
         cwd: { type: 'string', description: 'Target repository. Defaults to the current directory.' },
         background: { type: 'boolean', default: false },
         persistOnDisconnect: { type: 'boolean', default: false, description: 'Allow a background job to continue after the Codex session stops. Use only when explicitly requested.' },
-        leaseTimeoutMs: { type: 'integer', minimum: 30000, maximum: 600000, default: 90000, description: 'Background job lease maintained by the MCP service heartbeat.' },
+        leaseTimeoutMs: { type: 'integer', minimum: 30000, maximum: 600000, default: 300000, description: 'Background job lease renewed by explicit job_status polling; it expires when the Codex session stops polling.' },
         dryRun: { type: 'boolean', default: false },
         codexReviewRequired: { type: 'boolean', default: true },
         resume: { type: 'string', description: 'Optional Claude session id or selector to resume.' },
@@ -64,7 +64,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'job_status',
-    description: 'Show compact Claude Code background job progress. Use since_progress_revision and poll_attempt to follow the adaptive 30/60/120/180 second schedule; the MCP service maintains leases internally.',
+    description: 'Show compact Claude Code background job progress and renew its non-persistent lease. Use since_progress_revision and poll_attempt to follow the adaptive 30/60/120/180 second schedule; stopping polling lets the lease expire.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -186,6 +186,7 @@ export class McpServer {
           limit: args.limit,
           sinceRevision: args.since_progress_revision,
           pollAttempt: args.poll_attempt,
+          renewLease: true,
         });
         else if (name === 'job_result') value = this.service.result(args.job_id, { full: args.full, maxTextChars: args.max_text_chars });
         else if (name === 'job_cancel') value = this.service.cancel(args.job_id);

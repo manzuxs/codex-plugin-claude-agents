@@ -5,6 +5,8 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { startDashboard } from '../plugins/claude-code-agents/server/dashboard.mjs';
+import { JobStore } from '../plugins/claude-code-agents/server/lib/job-store.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pluginRoot = process.env.CLAUDE_AGENTS_TEST_PLUGIN_ROOT || path.join(root, 'plugins', 'claude-code-agents');
@@ -84,6 +86,20 @@ test('MCP open_dashboard starts the local command center without opening a brows
   assert.match(result.url, /^http:\/\/127\.0\.0\.1:\d+$/);
 });
 
+test('dashboard serves browser modules with JavaScript MIME types', async () => {
+  const running = await startDashboard({ pluginRoot, service: {} });
+  try {
+    const [app, helper] = await Promise.all([
+      fetch(`${running.url}/app.js`),
+      fetch(`${running.url}/dashboard-motion.mjs`),
+    ]);
+    assert.equal(app.headers.get('content-type'), 'text/javascript; charset=utf-8');
+    assert.equal(helper.headers.get('content-type'), 'text/javascript; charset=utf-8');
+  } finally {
+    await new Promise((resolve) => running.server.close(resolve));
+  }
+});
+
 test('MCP server initializes, lists tools, and performs a dry-run delegation', async () => {
   const child = spawn(process.execPath, [server], { cwd: root, env: isolatedEnv('dry-run'), stdio: ['pipe', 'pipe', 'pipe'] });
   const messages = [];
@@ -123,8 +139,8 @@ test('MCP server initializes, lists tools, and performs a dry-run delegation', a
   const runAgent = tools.find((tool) => tool.name === 'run_agent');
   assert.ok(runAgent);
   assert.equal(runAgent.inputSchema.properties.persistOnDisconnect.default, false);
-  assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.default, 90000);
-  assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.description.includes('job_status'), false);
+  assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.default, 300000);
+  assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.description.includes('job_status'), true);
   assert.deepEqual(runAgent.inputSchema.properties.browserMode.enum, ['none', 'repository', 'chrome', 'mcp']);
   assert.equal(runAgent.inputSchema.properties.browserMode.default, 'none');
   assert.match(runAgent.inputSchema.properties.browserMode.description, /user-configured permission mode/);
@@ -250,6 +266,55 @@ setInterval(() => {}, 1000);
   assert.equal(result.status, 'cancelled');
   assert.ok(result.jobId);
   assert.equal(result.structured, undefined);
+});
+
+test('closing the MCP session cancels owned background workers', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-mcp-disconnect-'));
+  const dataRoot = path.join(temp, 'data');
+  const startedFile = path.join(temp, 'started');
+  const stoppedFile = path.join(temp, 'stopped');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.writeFileSync(process.env.MOCK_STARTED_PATH, 'started');
+process.once('SIGTERM', () => { fs.writeFileSync(process.env.MOCK_STOPPED_PATH, 'stopped'); process.exit(0); });
+setInterval(() => {}, 1000);
+`);
+  fs.chmodSync(mock, 0o755);
+
+  const child = spawn(process.execPath, [server], {
+    cwd: root,
+    env: { ...process.env, ...isolatedEnv('disconnect'), CLAUDE_BIN: mock, CLAUDE_AGENTS_DATA_ROOT: dataRoot, MOCK_STARTED_PATH: startedFile, MOCK_STOPPED_PATH: stoppedFile },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const messages = [];
+  let buffer = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    let i;
+    while ((i = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, i).trim(); buffer = buffer.slice(i + 1);
+      if (line) messages.push(JSON.parse(line));
+    }
+  });
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 40, method: 'tools/call', params: { name: 'run_agent', arguments: {
+    agent: '后端工程师', task: 'Stop when the MCP session closes', plan: '1. Wait for the MCP session to close.', cwd: temp, background: true, leaseTimeoutMs: 30_000,
+  } } }) + '\n');
+  const response = await waitFor(() => messages.find((message) => message.id === 40), 3000);
+  const created = JSON.parse(response.result.content[0].text);
+  await waitFor(() => fs.existsSync(startedFile));
+  child.stdin.end();
+  await new Promise((resolve) => child.once('close', resolve));
+
+  const store = new JobStore(dataRoot);
+  const stopped = await waitFor(() => {
+    const status = store.get(created.jobId);
+    return status.status === 'cancelled' ? status : null;
+  }, 3000);
+  assert.equal(stopped.cancellationReason, 'mcp_stdin_closed');
+  await waitFor(() => fs.existsSync(stoppedFile));
+  store.close();
 });
 
 test('foreground MCP run returns one compact result and stores full diagnostics locally', async () => {
