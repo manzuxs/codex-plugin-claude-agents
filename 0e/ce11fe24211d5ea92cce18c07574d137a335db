@@ -1,0 +1,77 @@
+plugins/claude-code-agents/skills/claude-agent-admin/SKILL.md
+  s_1fbb6c26a95e7b::t_b4392a0265ee05 59
+plugins/claude-code-agents/server/lib/service.mjs
+  s_1fbb6c26a95e7b::t_689ea4f34ad058 17,339-340,404-412
+product-acceptance.md
+  s_a44b79fd9d38f0::t_e4196d9dd70f55 1-10,14-35
+  s_a44b79fd9d38f0::t_d249f6d8d16082 11-12
+  s_a44b79fd9d38f0::t_3cb4db3dae2e8b 13
+plugins/claude-code-agents/server/lib/mcp.mjs
+  s_1fbb6c26a95e7b::t_fc470a5434a17b 37,67,189
+tests/background.test.mjs
+  s_1fbb6c26a95e7b::t_6134d32f1b97ea 152,171-175,180-181
+QUICKSTART.md
+  s_1fbb6c26a95e7b::t_b4392a0265ee05 79
+README.md
+  s_1fbb6c26a95e7b::t_b4392a0265ee05 252
+plugins/claude-code-agents/skills/claude-orchestrator/SKILL.md
+  s_1fbb6c26a95e7b::t_b4392a0265ee05 52,65
+README.zh-CN.md
+  s_1fbb6c26a95e7b::t_b4392a0265ee05 253
+plugins/claude-code-agents/dashboard/styles.css
+  s_1fbb6c26a95e7b::t_4cb677230cac34 199,208
+  s_1fbb6c26a95e7b::t_29b29c6a3e3a09 16-20,149,158,169-171,177,181,213-335,351,355-358,364-374
+tests/mcp.test.mjs
+  s_1fbb6c26a95e7b::t_beb48a916f36a5 9,271-317
+  s_1fbb6c26a95e7b::t_7f85eea93e1903 142-143
+  s_1fbb6c26a95e7b::t_d137901cfb193c 8
+  s_1fbb6c26a95e7b::t_96164e03200622 318-319
+  s_1fbb6c26a95e7b::t_6a909daafe4dda 89-102
+design-qa.md
+  s_1fbb6c26a95e7b::t_f0e756c167df45 1,3-7,11-17,21-26,30,32-34,36,38-40,42,44-46,48,50-52,60,62-68,70-71
+  s_a44b79fd9d38f0::t_51ced88851b985 2,8-10,18-20,27-28
+  s_9084cb67a82744::t_390a98e876f149 53
+  s_9084cb67a82744::t_83fee9cc33f7cf 61,72-73
+  s_1fbb6c26a95e7b::t_41036562628a49 54-59,69
+  s_87a19dd2a723b8::t_f5a941d933844b 29,31,35,37,41,43,47,49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0ece11fe24211d5ea92cce18c07574d137a335db",
+  "prompts": {},
+  "sessions": {
+    "s_1fbb6c26a95e7b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6f52-a62c-7c72-b060-e8cccce875eb",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_87a19dd2a723b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6eec-b81b-79c1-a9aa-aa2cf1d3098b",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_9084cb67a82744": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6ec9-88c6-73c2-9c7f-c0294b9709d3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_a44b79fd9d38f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6df9-c175-7c90-bbd5-cd203460f9e1",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
