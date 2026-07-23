@@ -1,0 +1,165 @@
+.gitignore
+  s_5d968f145bfc8b::t_f68e3154fc2cb0 4,8-11
+tests/mcp.test.mjs
+  s_dd14879eb0491e::t_fbc14ba468c245 126,194,196-197,476-521
+  s_dd14879eb0491e::t_2fd58af532f1e6 259,274-281,315-325
+  s_b0e739e244920c::t_cbb73dae106da2 240
+  s_b0e739e244920c::t_7e546de3ebe579 342
+  s_b0e739e244920c::t_2a6943e1ef0f25 241-245,334-341,343-370,372-375
+  s_dd14879eb0491e::t_995051e48a8691 123-125
+  s_dd14879eb0491e::t_23f7039cf2ca9d 127-129,191-193
+  s_dd14879eb0491e::t_3d225af3d7fef0 195
+  s_dd14879eb0491e::t_faebeb3ca60c0a 198
+  s_dd14879eb0491e::t_910635f7140c0c 10,104-122,130-190,234
+tests/agents.test.mjs
+  s_b0e739e244920c::t_5837cdece46ff4 94,98-99
+plugins/claude-code-agents/skills/claude-agent-admin/SKILL.md
+  s_b0e739e244920c::t_5837cdece46ff4 59
+plugins/claude-code-agents/server/lib/version.mjs
+  s_e396e5321ea059::t_1dfd4b09496ca5 1-9
+README.zh-CN.md
+  s_b0e739e244920c::t_302198a3c84fab 236-237,254,256
+  s_2b9d52aea2f2c3::t_971dfb1289c73b 258,264-265,317-324
+tests/background.test.mjs
+  s_b0e739e244920c::t_2a6943e1ef0f25 152,156-159,175,177,182-194,196-212
+  s_b0e739e244920c::t_7e546de3ebe579 195
+  s_dd14879eb0491e::t_1d53a34c347e88 441-511
+tests/sqlite.test.mjs
+  s_e396e5321ea059::t_1eb05201b31f4b 23,77-86,89-117
+  s_e396e5321ea059::t_85a9ff85c3b20e 20-22
+  s_e396e5321ea059::t_adaba7c08a98be 24
+  s_e396e5321ea059::t_d838f23a5ea28c 87-88
+  s_e396e5321ea059::t_d584858d1de2c3 6-7,11-19
+VALIDATION.md
+  s_b0e739e244920c::t_302198a3c84fab 18-19,22,32
+  s_2b9d52aea2f2c3::t_ec29f016a68487 3,7,34-38,79-89
+QUICKSTART.md
+  s_b0e739e244920c::t_302198a3c84fab 65,67,79
+  s_2b9d52aea2f2c3::t_e2ad0d59cb55e6 121-136
+product-acceptance.md
+  s_e396e5321ea059::t_abf9e8175d21fa 28
+  s_5d968f145bfc8b::t_9f4a09e614ae5c 25-27
+  s_e396e5321ea059::t_4a3ef0518c5fab 36
+plugins/claude-code-agents/server/lib/service.mjs
+  s_e396e5321ea059::t_d1cd4cf7072c37 520,551,578-581
+  s_b0e739e244920c::t_0478136922c7d1 19-20,84,146-185,483,485-486,492-519
+  s_dd14879eb0491e::t_149c853544c4fb 319,325,332,334-338,344,352-357,373,419,427-429,431-435,451-461,463,539-541,587
+  s_e396e5321ea059::t_30eeba11c1c648 521
+  s_dd14879eb0491e::t_64499b0acfa88f 537-538
+  s_e396e5321ea059::t_d84b677cdedc7d 552-554
+  s_dd14879eb0491e::t_40a59db641e8a4 7-8,188,192,194-196,212,219,238,245,317,542-550,555-567,569
+plugins/claude-code-agents/server/lib/job-store.mjs
+  s_e396e5321ea059::t_d1cd4cf7072c37 8-9,63-64,79,81-83,195-214
+  s_e396e5321ea059::t_4eb0c0c9e8f989 215-217
+  s_2b9d52aea2f2c3::t_91ccfc3c69a9e0 5,218-220
+scripts/check.mjs
+  s_e396e5321ea059::t_1dfd4b09496ca5 1-33
+plugins/claude-code-agents/skills/claude-orchestrator/SKILL.md
+  s_b0e739e244920c::t_f5c82651f9706b 47,52,61-62,65-66,76
+plugins/claude-code-agents/server/worker.mjs
+  s_b0e739e244920c::t_7e546de3ebe579 85-87
+  s_b0e739e244920c::t_0478136922c7d1 41,57-59
+  s_b0e739e244920c::t_0189078c7a2fae 56
+  s_b0e739e244920c::t_b1396629261772 84
+  s_2b9d52aea2f2c3::t_f129b4aad23faf 5,30-31,95-97,104,120,133-136
+README.md
+  s_b0e739e244920c::t_302198a3c84fab 235-236,253,255
+  s_2b9d52aea2f2c3::t_b5ca32f126e7e7 257,263-264,316-323
+plugins/claude-code-agents/server/lib/mcp.mjs
+  s_b0e739e244920c::t_0478136922c7d1 77,216-217,219-228
+  s_e396e5321ea059::t_e6bb4cd10c56a6 2,170
+  s_b0e739e244920c::t_5a801799c4bb95 14,24,33,38-39,45,47,82-83,90-99
+  s_b0e739e244920c::t_4dfbb33c22a91c 15-17
+  s_b0e739e244920c::t_6e65ca530da8cc 25-27
+  s_b0e739e244920c::t_da84171b7c4c0e 100-102
+  s_b0e739e244920c::t_2f7cee21690204 218
+  s_2b9d52aea2f2c3::t_0a57df09b8ff9e 18,103,162-163,198-199,202,263
+.github/workflows/ci.yml
+  s_e396e5321ea059::t_1dfd4b09496ca5 1-20
+package.json
+  s_638f3f5f7bca13::t_9affec899c83ca 9-10
+plugins/claude-code-agents/.env.example
+  s_2b9d52aea2f2c3::t_bf28d1e49134ea 76-95
+plugins/claude-code-agents/server/cli.mjs
+  s_638f3f5f7bca13::t_4558d5898cd101 57,71
+plugins/claude-code-agents/server/lib/agents.mjs
+  s_2b9d52aea2f2c3::t_713ad283055dab 5,56,58-75,78,83,86-90,94,96,102,122,124,140
+plugins/claude-code-agents/server/lib/claude.mjs
+  s_2b9d52aea2f2c3::t_4d623e26ec621a 5,148,174,188,197-200,223-249,252-260,262,264-284,286-328
+plugins/claude-code-agents/server/lib/config-store.mjs
+  s_2b9d52aea2f2c3::t_0e50b33fa99031 3,6,16,87,99
+plugins/claude-code-agents/server/lib/execution/run-agent.mjs
+  s_2b9d52aea2f2c3::t_a8a1a474eaa682 1-20
+plugins/claude-code-agents/server/lib/execution/supervisor.mjs
+  s_2b9d52aea2f2c3::t_8c9f6718e2ebc6 1-126
+plugins/claude-code-agents/server/lib/runners/capabilities.mjs
+  s_2b9d52aea2f2c3::t_aecdb567b69388 1-30
+plugins/claude-code-agents/server/lib/runners/claude.mjs
+  s_2b9d52aea2f2c3::t_05e1546fcedfdb 1-7
+plugins/claude-code-agents/server/lib/runners/codex.mjs
+  s_2b9d52aea2f2c3::t_d3ff981fc663d2 1-178
+plugins/claude-code-agents/server/lib/runners/index.mjs
+  s_2b9d52aea2f2c3::t_e6cf887b71e9e6 1-3
+plugins/claude-code-agents/server/lib/runners/registry.mjs
+  s_2b9d52aea2f2c3::t_6eab6dffd05bbb 1-38
+plugins/claude-code-agents/server/lib/sqlite.mjs
+  s_638f3f5f7bca13::t_ead1d74268733a 1-18
+tests/runners.test.mjs
+  s_2b9d52aea2f2c3::t_649a87dae2293c 1-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7817053f07d20c8692e6c4e0a2f52c36ffcf1139",
+  "prompts": {},
+  "sessions": {
+    "s_2b9d52aea2f2c3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2201f93-c8c3-4f32-87ba-c2f80fdd3d75",
+        "model": "unknown"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_5d968f145bfc8b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8cc3-221c-7400-b797-ec0facfc27c7",
+        "model": "google-antigravity/gemini-3.6-flash-high"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_638f3f5f7bca13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab232b2c-3108-4672-a938-857c24ebe506",
+        "model": "unknown"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_b0e739e244920c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8d2b-6b3c-7b91-9185-9f0ad0ca782c",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_dd14879eb0491e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8d58-5afe-7660-b8b9-e00db949b843",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_e396e5321ea059": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8cc6-0e65-76f0-baa3-40b323aca989",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
