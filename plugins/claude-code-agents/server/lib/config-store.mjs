@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from './sqlite.mjs';
 
 const FIELD_SUFFIX = Object.freeze({
+  runner: 'DEFAULT_RUNNER',
   model: 'MODEL', effort: 'EFFORT', permissionMode: 'PERMISSION_MODE', timeoutMs: 'TIMEOUT_MS',
   maxBudgetUsd: 'MAX_BUDGET_USD', gatewayUrl: 'GATEWAY_URL', apiKey: 'API_KEY', apiKeyKind: 'API_KEY_KIND', outputFormat: 'OUTPUT_FORMAT',
   browserMcpConfigsJson: 'BROWSER_MCP_CONFIGS_JSON',
@@ -12,6 +13,7 @@ const ENUMS = Object.freeze({
   effort: new Set(['low', 'medium', 'high', 'xhigh', 'max']),
   permissionMode: new Set(['auto', 'plan', 'acceptEdits', 'bypassPermissions']),
   apiKeyKind: new Set(['auth_token', 'api_key']),
+  runner: new Set(['claude', 'codex']),
   outputFormat: new Set(['text', 'json', 'stream-json']),
 });
 
@@ -82,6 +84,7 @@ export class ConfigStore {
     const config = this.values();
     const prefix = agent.prefix;
     return {
+      runner: runtime.runner,
       model: runtime.model,
       effort: runtime.effort,
       permissionMode: runtime.permissionMode,
@@ -93,7 +96,7 @@ export class ConfigStore {
       browserMcpConfigsJson: JSON.stringify(runtime.browserMcpConfigs || {}),
       browserMcpProfiles: Object.keys(runtime.browserMcpConfigs || {}),
       apiKeyConfigured: Boolean(runtime.apiKey),
-      storedKeys: Object.keys(config).filter((key) => key.startsWith(`${prefix}_`) || key.startsWith('CLAUDE_DEFAULT_')),
+      storedKeys: Object.keys(config).filter((key) => key.startsWith(`${prefix}_`) || key.startsWith('CLAUDE_DEFAULT_') || key.startsWith('DEFAULT_')),
     };
   }
 

@@ -1,29 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { buildDelegationPrompt } from './xml.mjs';
 import { collectSensitiveValues, redactObject, redactText } from './redact.mjs';
+import { superviseProcess } from './execution/supervisor.mjs';
 import { browserUseObserved, inspectBrowserInit } from './browser.mjs';
 
-const MAX_CAPTURE_BYTES = 20 * 1024 * 1024;
-
-function terminateProcessTree(child, signal) {
-  if (!child?.pid) return;
-  try {
-    if (process.platform !== 'win32') process.kill(-child.pid, signal);
-    else child.kill(signal);
-  } catch {
-    try { child.kill(signal); } catch {}
-  }
-}
-
-function appendWithLimit(current, chunk, label) {
-  const next = current + chunk;
-  if (Buffer.byteLength(next, 'utf8') > MAX_CAPTURE_BYTES) {
-    throw new Error(`${label} exceeded ${MAX_CAPTURE_BYTES} bytes`);
-  }
-  return next;
-}
 
 export function buildClaudeInvocation({ pluginRoot, agent, runtime, request }) {
   const promptFile = path.join(pluginRoot, 'agents', agent.prompt);
@@ -164,7 +145,7 @@ function parseEventOutput(events, fallbackText) {
   if (!terminal) return { text: fallbackText, structured: events };
   return {
     text: terminal.result ?? terminal.message ?? fallbackText,
-    sessionId: terminal.session_id ?? terminal.sessionId ?? null,
+    sessionId: terminal.session_id ?? terminal.sessionId ?? terminal.session?.id ?? null,
     costUsd: terminal.total_cost_usd ?? terminal.cost_usd ?? null,
     durationMs: terminal.duration_ms ?? null,
     turns: terminal.num_turns ?? null,
@@ -190,7 +171,7 @@ export function parseClaudeOutput(stdout, outputFormat) {
     if (Array.isArray(parsed)) return parseEventOutput(parsed, stdout.trim());
     return {
       text: parsed.result ?? parsed.message ?? stdout.trim(),
-      sessionId: parsed.session_id ?? parsed.sessionId ?? null,
+      sessionId: parsed.session_id ?? parsed.sessionId ?? parsed.session?.id ?? null,
       costUsd: parsed.total_cost_usd ?? parsed.cost_usd ?? null,
       durationMs: parsed.duration_ms ?? null,
       turns: parsed.num_turns ?? null,
@@ -204,7 +185,7 @@ export function parseClaudeOutput(stdout, outputFormat) {
   }
 }
 
-export async function runClaude({ pluginRoot, agent, runtime, request, cwd, signal: abortSignal, onProgress }) {
+export async function runClaude({ pluginRoot, agent, runtime, request, cwd, signal: abortSignal, onProgress, onSpawn }) {
   const invocation = buildClaudeInvocation({ pluginRoot, agent, runtime, request });
   const startedAt = new Date().toISOString();
   if (request.dryRun) {
@@ -213,6 +194,10 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
       dryRun: true,
       startedAt,
       agent: agent.id,
+      role: agent.id,
+      runner: 'claude',
+      model: runtime.model,
+      capabilitiesUsed: ['rolePrompt'],
       planSha256: request.planSha256 || null,
       cwd,
       command: invocation.command,
@@ -235,154 +220,110 @@ export async function runClaude({ pluginRoot, agent, runtime, request, cwd, sign
     };
   }
 
-  return await new Promise((resolve, reject) => {
-    const secrets = collectSensitiveValues(invocation.env);
-    const child = spawn(invocation.command, invocation.args, {
-      cwd,
-      env: invocation.env,
-      shell: false,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    let cancelled = false;
-    let timedOut = false;
-    let streamBuffer = '';
-    let forceKillTimer;
-    let capabilityFailure = null;
-    let browserInitObserved = request.browserMode === 'repository' || request.browserMode === 'none' || !request.browserMode;
-    let browserCapabilityReady = browserInitObserved;
-    let browserToolUseObserved = false;
-    const stopChild = (reason) => {
-      if (settled) return;
-      if (reason === 'cancelled') cancelled = true;
-      if (reason === 'timeout') timedOut = true;
-      terminateProcessTree(child, 'SIGTERM');
-      if (!forceKillTimer) forceKillTimer = setTimeout(() => terminateProcessTree(child, 'SIGKILL'), 3000).unref();
-    };
-    const emitProgressLine = (line) => {
-      if (runtime.outputFormat !== 'stream-json' || !line.trim()) return;
-      try {
-        const event = JSON.parse(line);
-        const safeEvent = redactObject(JSON.parse(redactText(JSON.stringify(event), secrets)));
-        const capability = inspectBrowserInit(event, request);
-        if (capability) {
-          browserInitObserved = true;
-          browserCapabilityReady = capability.ok;
-          if (!capability.ok && !capabilityFailure) {
-            capabilityFailure = capability;
-            onProgress?.({
-              event: safeEvent,
-              phase: 'blocked',
-              verificationState: 'failed',
-              browserCapability: 'missing',
-              browserBackend: request.browserBackend,
-              installationHint: capability.installationHint,
-              lastActivityAt: new Date().toISOString(),
-            });
-            stopChild('capability');
-          }
+  const secrets = collectSensitiveValues(invocation.env);
+  let streamBuffer = '';
+  let capabilityFailure = null;
+  let browserInitObserved = request.browserMode === 'repository' || request.browserMode === 'none' || !request.browserMode;
+  let browserCapabilityReady = browserInitObserved;
+  let browserToolUseObserved = false;
+  const emitProgressLine = (line, stop) => {
+    if (runtime.outputFormat !== 'stream-json' || !line.trim()) return;
+    try {
+      const event = JSON.parse(line);
+      const safeEvent = redactObject(JSON.parse(redactText(JSON.stringify(event), secrets)));
+      const capability = inspectBrowserInit(event, request);
+      if (capability) {
+        browserInitObserved = true;
+        browserCapabilityReady = capability.ok;
+        if (!capability.ok && !capabilityFailure) {
+          capabilityFailure = capability;
+          onProgress?.({
+            event: safeEvent,
+            phase: 'blocked',
+            verificationState: 'failed',
+            browserCapability: 'missing',
+            browserBackend: request.browserBackend,
+            installationHint: capability.installationHint,
+            lastActivityAt: new Date().toISOString(),
+          });
+          stop('capability');
         }
-        if (browserUseObserved(event, request)) browserToolUseObserved = true;
-        if (!onProgress) return;
-        const progress = classifyProgressEvent(event);
-        if (!progress) return;
-        if (progress.lastToolSummary) progress.lastToolSummary = redactText(progress.lastToolSummary, secrets).slice(0, 256);
-        onProgress({
-          ...progress,
-          event: safeEvent,
-          browserCapability: browserCapabilityReady ? 'ready' : undefined,
-          browserBackend: request.browserBackend,
-          lastActivityAt: new Date().toISOString(),
-        });
-      } catch {}
-    };
-    const consumeProgressChunk = (chunk) => {
-      if (runtime.outputFormat !== 'stream-json') return;
-      streamBuffer += chunk;
-      let index;
-      while ((index = streamBuffer.indexOf('\n')) >= 0) {
-        const line = streamBuffer.slice(0, index);
-        streamBuffer = streamBuffer.slice(index + 1);
-        emitProgressLine(line);
       }
-    };
-    const onAbort = () => stopChild('cancelled');
-    if (abortSignal?.aborted) onAbort();
-    else abortSignal?.addEventListener('abort', onAbort, { once: true });
-    const timeout = setTimeout(() => {
-      stopChild('timeout');
-    }, runtime.timeoutMs);
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => {
-      try {
-        stdout = appendWithLimit(stdout, chunk, 'stdout');
-        consumeProgressChunk(chunk);
-      }
-      catch (error) { terminateProcessTree(child, 'SIGTERM'); reject(error); }
-    });
-    child.stderr.on('data', (chunk) => {
-      try { stderr = appendWithLimit(stderr, chunk, 'stderr'); }
-      catch (error) { terminateProcessTree(child, 'SIGTERM'); reject(error); }
-    });
-    child.on('error', (error) => {
-      clearTimeout(timeout);
-      clearTimeout(forceKillTimer);
-      abortSignal?.removeEventListener('abort', onAbort);
-      settled = true;
-      reject(new Error(`Failed to start Claude Code CLI (${invocation.command}): ${error.message}`));
-    });
-    child.on('close', (code, signal) => {
-      clearTimeout(timeout);
-      clearTimeout(forceKillTimer);
-      abortSignal?.removeEventListener('abort', onAbort);
-      if (settled) return;
-      settled = true;
-      if (streamBuffer) emitProgressLine(streamBuffer);
-      const safeStdout = redactText(stdout, secrets);
-      const safeStderr = redactText(stderr, secrets);
-      const parsed = parseClaudeOutput(safeStdout, runtime.outputFormat);
-      const finishedAt = new Date().toISOString();
-      if (request.browserMode && request.browserMode !== 'none' && !browserInitObserved && !capabilityFailure) {
-        capabilityFailure = {
-          error: '浏览器能力预检失败：Claude 会话未返回包含工具清单的 system/init 事件。',
-          installationHint: request.browserInstallationHint,
-        };
-      }
-      const executionMissing = request.browserMode && request.browserMode !== 'none'
-        && !capabilityFailure && code === 0 && !browserToolUseObserved;
-      const blocked = Boolean(capabilityFailure || executionMissing);
-      const browserError = capabilityFailure?.error || (executionMissing
-        ? '浏览器能力已加载，但未观察到真实浏览器工具调用或 Playwright/Cypress 执行；请使用同一 QA 会话重试。'
-        : undefined);
-      resolve({
-        ok: code === 0 && !cancelled && !timedOut && !blocked,
-        cancelled,
-        timedOut,
-        blocked,
-        cancellationReason: cancelled ? String(abortSignal?.reason || 'cancelled') : undefined,
-        agent: agent.id,
-        planSha256: request.planSha256 || null,
-        cwd,
-        startedAt,
-        finishedAt,
-        exitCode: code,
-        signal,
-        stderr: safeStderr.trim() || undefined,
-        ...parsed,
-        error: browserError,
-        browserCapability: request.browserMode === 'none' || !request.browserMode
-          ? 'not_required'
-          : (capabilityFailure ? 'missing' : 'ready'),
+      if (browserUseObserved(event, request)) browserToolUseObserved = true;
+      if (!onProgress) return;
+      const progress = classifyProgressEvent(event);
+      if (!progress) return;
+      if (progress.lastToolSummary) progress.lastToolSummary = redactText(progress.lastToolSummary, secrets).slice(0, 256);
+      onProgress({
+        ...progress,
+        event: safeEvent,
+        browserCapability: browserCapabilityReady ? 'ready' : undefined,
         browserBackend: request.browserBackend,
-        browserPurpose: request.browserPurpose,
-        browserToolUseObserved,
-        installationHint: capabilityFailure?.installationHint,
+        lastActivityAt: new Date().toISOString(),
       });
-    });
+    } catch {}
+  };
+  const consumeProgressChunk = (chunk, controls) => {
+    if (runtime.outputFormat !== 'stream-json') return;
+    streamBuffer += chunk;
+    let index;
+    while ((index = streamBuffer.indexOf('\n')) >= 0) {
+      const line = streamBuffer.slice(0, index);
+      streamBuffer = streamBuffer.slice(index + 1);
+      emitProgressLine(line, controls.stop);
+    }
+  };
+  const processResult = await superviseProcess({
+    command: invocation.command,
+    args: invocation.args,
+    cwd,
+    env: invocation.env,
+    signal: abortSignal,
+    timeoutMs: runtime.timeoutMs,
+    onSpawn,
+    onStdoutChunk: consumeProgressChunk,
   });
+  if (streamBuffer) emitProgressLine(streamBuffer, () => {});
+  const parsed = parseClaudeOutput(processResult.stdout, runtime.outputFormat);
+  const finishedAt = new Date().toISOString();
+  if (request.browserMode && request.browserMode !== 'none' && !browserInitObserved && !capabilityFailure) {
+    capabilityFailure = {
+      error: '浏览器能力预检失败：Claude 会话未返回包含工具清单的 system/init 事件。',
+      installationHint: request.browserInstallationHint,
+    };
+  }
+  const executionMissing = request.browserMode && request.browserMode !== 'none'
+    && !capabilityFailure && processResult.code === 0 && !browserToolUseObserved;
+  const blocked = Boolean(capabilityFailure || executionMissing);
+  const browserError = capabilityFailure?.error || (executionMissing
+    ? '浏览器能力已加载，但未观察到真实浏览器工具调用或 Playwright/Cypress 执行；请使用同一 QA 会话重试。'
+    : undefined);
+  return {
+    ok: processResult.code === 0 && !processResult.cancelled && !processResult.timedOut && !blocked,
+    cancelled: processResult.cancelled,
+    timedOut: processResult.timedOut,
+    blocked,
+    cancellationReason: processResult.cancelled ? String(abortSignal?.reason || 'cancelled') : undefined,
+    agent: agent.id,
+    runner: 'claude',
+    role: agent.id,
+    model: runtime.model,
+    capabilitiesUsed: ['rolePrompt', ...(request.browserMode && request.browserMode !== 'none' ? ['browser'] : [])],
+    planSha256: request.planSha256 || null,
+    cwd,
+    startedAt,
+    finishedAt,
+    exitCode: processResult.code,
+    signal: processResult.signal,
+    stderr: processResult.stderr.trim() || undefined,
+    ...parsed,
+    error: browserError,
+    browserCapability: request.browserMode === 'none' || !request.browserMode
+      ? 'not_required'
+      : (capabilityFailure ? 'missing' : 'ready'),
+    browserBackend: request.browserBackend,
+    browserPurpose: request.browserPurpose,
+    browserToolUseObserved,
+    installationHint: capabilityFailure?.installationHint,
+  };
 }

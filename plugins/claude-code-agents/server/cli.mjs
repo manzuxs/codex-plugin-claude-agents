@@ -54,6 +54,7 @@ try {
   else if (command === 'status') result = service.status(values.jobId || values._[0], { full: Boolean(values.full), limit: values.limit ? Number(values.limit) : undefined });
   else if (command === 'result') result = service.result(values.jobId || values._[0], { full: Boolean(values.full), maxTextChars: values.maxTextChars ? Number(values.maxTextChars) : undefined });
   else if (command === 'cancel') result = service.cancel(values.jobId || values._[0]);
+  else if (command === 'cleanup') result = service.cleanupJobs({ before: values.before, limit: values.limit ? Number(values.limit) : undefined });
   else if (command === 'dashboard') {
     const { startDashboard } = await import('./dashboard.mjs');
     const running = await startDashboard({ pluginRoot, service, port: values.port ? Number(values.port) : 0, open: Boolean(values.open) });
@@ -67,6 +68,7 @@ try {
   cli.mjs status [JOB_ID] [--full] [--limit 5]
   cli.mjs result [JOB_ID] [--full] [--max-text-chars 12000]
   cli.mjs cancel JOB_ID
+  cli.mjs cleanup --before ISO_DATE [--limit 100]
   cli.mjs dashboard [--port PORT] [--open]`);
     process.exit(0);
   }

@@ -232,7 +232,8 @@ The plugin checks repository dependencies, validates MCP configuration, inspects
 |---|---|
 | `list_agents` | Lists available agents and non-secret runtime settings. |
 | `run_agent` | Delegates an approved plan to one specialist. |
-| `job_status` | Returns compact progress for a background job. |
+| `job_status` | Returns compact read-only progress for a background job. |
+| `job_wait` | Waits inside the MCP server and returns one compact terminal result. |
 | `job_result` | Returns the stored terminal result. |
 | `job_cancel` | Cancels an active background job. |
 
@@ -249,16 +250,18 @@ browserMode, browserMcpProfile
 
 ### Background jobs
 
-Normal orchestration uses `background=true`. The call returns a job ID and an adaptive `nextPollSeconds` hint. Codex reads compact progress with `job_status`, which also renews non-persistent jobs, and retrieves the terminal result once with `job_result`; stopping polls lets the lease expire and terminate the worker.
+Sequential work defaults to `background=false`, so the MCP request waits and Codex resumes once with the compact result. Use `background=true` for parallel or explicitly monitored work, then call `job_wait` once; the MCP server waits for the terminal state outside the Codex model loop. `job_status` is read-only, and Worker activity renews the lease without Codex polling.
 
-Use `background=false` when the user explicitly requests a single blocking wait with no progress polling. Use `persistOnDisconnect=true` only when the user explicitly wants the job to survive the Codex session.
+Use `background=true` only when the job must return a Job ID first, run in parallel, or expose progress. Use `persistOnDisconnect=true` only when the user explicitly wants the job to survive the Codex session.
 
-Job data is stored under the Codex-provided `PLUGIN_DATA` directory. Direct execution falls back to `~/.codex/claude-code-agents`.
+Job data is stored under the Codex-provided `PLUGIN_DATA` directory. Direct execution falls back to `~/.codex/claude-code-agents`. History retention is explicit: `node plugins/claude-code-agents/server/cli.mjs cleanup --before ISO_DATE` removes only old terminal jobs and their events; it does not run automatically and never removes active jobs.
 
 ## Diagnostics
 
 ```bash
 npm test
+npm run check
+npm run coverage
 npm run doctor
 npm run list-agents
 npm run dry-run
@@ -310,3 +313,11 @@ Remove `--dry-run` only when you intend to start the local Claude Code process.
 ## License
 
 MIT
+
+## Phase 1 runners
+
+Execution is modeled as `role + runner`. Existing calls that omit `runner` remain Claude calls; use `runner: "codex"` to select the Codex adapter explicitly. `list_runners` exposes the available runners and declared capabilities. The Codex adapter invokes `codex exec --json`; the selected role XML is injected into the prompt and is not passed as native `--agents` configuration.
+
+Runner configuration precedence is: runner default, role default runner, role × runner settings, process environment, then one-run non-secret overrides. Existing `CLAUDE_DEFAULT_*` and `<ROLE>_*` variables remain supported. Codex does not support Claude browser modes, effort values, resume/session IDs, or arbitrary native CLI options; unsupported requests return an explicit error.
+
+Codex credentials, when required by the installed CLI, remain in its child-process environment. Native CLI arguments are generated only by the trusted adapter and configuration; MCP callers cannot inject arbitrary native options.

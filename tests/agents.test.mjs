@@ -91,16 +91,14 @@ test('UI and frontend prompts require role-appropriate real-browser evidence whe
   assert.match(frontend, /prefer repository Playwright\/Cypress/);
 });
 
-test('orchestrator requires adaptive background polling and editable stage continuation', () => {
+test('orchestrator prefers server-side waiting and editable stage continuation', () => {
   const skill = fs.readFileSync(path.join(root, 'skills', 'claude-orchestrator', 'SKILL.md'), 'utf8');
   assert.match(skill, /background=true/);
-  assert.match(skill, /nextPollSeconds/);
-  assert.match(skill, /30.*60.*120.*180/);
   assert.match(skill, /background=false/);
-  assert.match(skill, /静默等待/);
+  assert.match(skill, /job_wait/);
+  assert.match(skill, /只读.*job_status/);
   assert.match(skill, /下一阶段执行计划/);
   assert.match(skill, /新任务提示/);
-  assert.match(skill, /无变化时.*不输出/);
   assert.match(skill, /ui-designer.*视觉验收/);
   assert.match(skill, /frontend-engineer.*实现自测/);
   assert.match(skill, /qa-engineer.*独立冒烟/);

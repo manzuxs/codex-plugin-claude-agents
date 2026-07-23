@@ -2,15 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-let DatabaseSync;
-try {
-  process.removeAllListeners('warning');
-  ({ DatabaseSync } = await import('node:sqlite'));
-} catch {
-  throw new Error('SQLite storage requires Node.js 22.5 or newer (node:sqlite).');
-}
+import { DatabaseSync } from './sqlite.mjs';
 
 const ACTIVE_STATUSES = new Set(['queued', 'starting', 'running']);
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'blocked']);
+const TERMINAL_STATUS_SQL = [...TERMINAL_STATUSES].map((status) => `'${status}'`).join(', ');
 
 function parseJson(value, fallback = null) {
   if (value === null || value === undefined || value === '') return fallback;
@@ -64,6 +60,8 @@ export class JobStore {
       listJobs: this.db.prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?'),
       deleteEvents: this.db.prepare('DELETE FROM job_events WHERE job_id = ?'),
       deleteJob: this.db.prepare('DELETE FROM jobs WHERE job_id = ?'),
+      selectTerminalForCleanup: this.db.prepare(`SELECT job_id FROM jobs WHERE status IN (${TERMINAL_STATUS_SQL}) AND updated_at < ? ORDER BY updated_at ASC LIMIT ?`),
+      countEvents: this.db.prepare('SELECT COUNT(*) AS count FROM job_events WHERE job_id = ?'),
     };
   }
 
@@ -78,7 +76,11 @@ export class JobStore {
       jobId,
       status: 'queued',
       createdAt: now,
+      role: request.role || request.agent,
       agent: request.agent,
+      runner: request.runner || 'claude',
+      model: request.model || null,
+      capabilitiesUsed: request.capabilitiesUsed || [],
       task: request.task || '',
       cwd: request.cwd,
       browserMode: request.browserMode || 'none',
@@ -184,6 +186,32 @@ export class JobStore {
       this.statements.deleteJob.run(jobId);
       this.db.exec('COMMIT');
       return { ok: true, jobId };
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
+  cleanupTerminal({ before, limit = 100 } = {}) {
+    if (before === undefined || before === null) throw new Error('cleanupTerminal requires a before date or timestamp.');
+    const cutoff = before instanceof Date ? before : new Date(before);
+    if (Number.isNaN(cutoff.getTime())) throw new Error('cleanupTerminal before must be a valid date or timestamp.');
+    const maxJobs = Math.max(1, Math.min(1000, Number(limit) || 100));
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const candidates = this.statements.selectTerminalForCleanup.all(cutoff.toISOString(), maxJobs);
+      const deletedJobIds = [];
+      let deletedEvents = 0;
+      for (const candidate of candidates) {
+        const row = this.statements.getJob.get(candidate.job_id);
+        if (!row || !TERMINAL_STATUSES.has(row.status)) continue;
+        deletedEvents += Number(this.statements.countEvents.get(candidate.job_id)?.count || 0);
+        this.statements.deleteEvents.run(candidate.job_id);
+        this.statements.deleteJob.run(candidate.job_id);
+        deletedJobIds.push(candidate.job_id);
+      }
+      this.db.exec('COMMIT');
+      return { ok: true, before: cutoff.toISOString(), deletedJobs: deletedJobIds.length, deletedEvents, jobIds: deletedJobIds };
     } catch (error) {
       try { this.db.exec('ROLLBACK'); } catch {}
       throw error;

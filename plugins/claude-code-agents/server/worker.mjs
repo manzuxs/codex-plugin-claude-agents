@@ -2,7 +2,7 @@
 import { resolvePluginRoot, resolveDataRoot } from './lib/paths.mjs';
 import { ClaudeAgentService } from './lib/service.mjs';
 import { resolveAgent } from './lib/agents.mjs';
-import { runClaude } from './lib/claude.mjs';
+import { runAgent } from './lib/execution/run-agent.mjs';
 
 const jobId = process.argv[2];
 if (!jobId) process.exit(2);
@@ -27,7 +27,8 @@ try {
   const stored = service.jobs.readJson(jobId, 'request.json');
   if (!stored) throw new Error(`Missing request for ${jobId}`);
   const agent = resolveAgent(service.registry, stored.agent);
-  const runtime = service.runtimeFor(agent, stored.cwd, { ...(stored.runtimeOverrides || {}), outputFormat: 'stream-json' });
+  const requestedRunner = stored.runner || stored.runtimeOverrides?.runner || 'claude';
+  const runtime = service.runtimeFor(agent, stored.cwd, { ...(stored.runtimeOverrides || {}), runner: requestedRunner, outputFormat: 'stream-json' });
   const startedMs = Date.now();
   let lastWriteMs = startedMs;
   let lastPhase = 'starting';
@@ -37,6 +38,7 @@ try {
   let browserCapability = null;
   let browserBackend = null;
   let installationHint = null;
+  let lastLeaseRenewalMs = startedMs;
   reportProgress = (progress = {}, force = false) => {
     if (progress.event) service.jobs.appendEvent(jobId, {
       at: progress.lastActivityAt || new Date().toISOString(),
@@ -51,6 +53,10 @@ try {
     if (progress.installationHint) installationHint = String(progress.installationHint).slice(0, 512);
     const phase = progress.phase || lastPhase;
     const now = Date.now();
+    if (!stored.persistOnDisconnect && stored.leaseTimeoutMs && now - lastLeaseRenewalMs >= Math.max(100, Math.floor(stored.leaseTimeoutMs / 3))) {
+      service.jobs.renewLease(jobId);
+      lastLeaseRenewalMs = now;
+    }
     if (!force && phase === lastPhase && now - lastWriteMs < 5000) return;
     const patch = {
       phase,
@@ -76,19 +82,26 @@ try {
     verificationState: 'pending',
   });
   if (!stored.persistOnDisconnect && stored.leaseTimeoutMs) {
+    service.jobs.renewLease(jobId);
+    lastLeaseRenewalMs = Date.now();
+  }
+  if (!stored.persistOnDisconnect && stored.leaseTimeoutMs) {
     const intervalMs = Math.min(5000, Math.max(250, Math.floor(stored.leaseTimeoutMs / 4)));
     leaseTimer = setInterval(() => {
       const meta = service.jobs.get(jobId);
       if (meta.leaseExpiresAt && Date.now() >= Date.parse(meta.leaseExpiresAt)) requestStop('lease_expired');
     }, intervalMs);
   }
-  const result = await runClaude({
+  const result = await runAgent({
+    runnerRegistry: service.runners,
+    runner: requestedRunner,
     pluginRoot,
     agent,
     runtime,
     cwd: stored.cwd,
     request: stored,
     signal: controller.signal,
+    onSpawn: ({ pid, processGroupId }) => service.jobs.writeMeta(jobId, { runnerPid: pid, runnerProcessGroupId: processGroupId, runnerOwnerPid: process.pid }),
     onProgress: (progress) => reportProgress(progress),
   });
   clearInterval(leaseTimer);
@@ -104,7 +117,7 @@ try {
     browserBackend: result.browserBackend,
     installationHint: result.installationHint,
   }, true);
-  service.jobs.writeResult(jobId, { ...result, cancelled, cancellationReason });
+  service.jobs.writeResult(jobId, { ...result, role: result.role || stored.role || stored.agent, agent: result.agent || stored.agent, runner: result.runner || requestedRunner, model: result.model || runtime.model, capabilitiesUsed: result.capabilitiesUsed || [], cancelled, cancellationReason });
   service.jobs.writeMeta(jobId, {
     status,
     finishedAt: new Date().toISOString(),
@@ -117,6 +130,10 @@ try {
     outputTokens: result.outputTokens,
     error: result.error,
     cancellationReason,
+    role: result.role || stored.role || stored.agent,
+    runner: result.runner || requestedRunner,
+    model: result.model || runtime.model,
+    capabilitiesUsed: result.capabilitiesUsed || [],
   });
   process.exitCode = result.ok ? 0 : 1;
 } catch (error) {

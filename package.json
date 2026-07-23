@@ -6,6 +6,8 @@
   "description": "Codex plugin marketplace that delegates approved plans to role-specialized Claude Code CLI agents.",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "coverage": "node --test --experimental-test-coverage tests/*.test.mjs",
     "doctor": "node plugins/claude-code-agents/scripts/doctor.mjs",
     "list-agents": "node plugins/claude-code-agents/server/cli.mjs list",
     "dry-run": "node plugins/claude-code-agents/server/cli.mjs run --agent backend-engineer --task 'dry run' --plan 'inspect only' --dry-run",

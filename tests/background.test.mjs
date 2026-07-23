@@ -149,11 +149,14 @@ test('adaptive polling backs off at 60, 120, and 180 seconds', () => {
   assert.equal(changed.nextPollSeconds, 60);
 });
 
-test('job status polling renews a background lease and idle sessions expire', async () => {
+test('worker activity renews a background lease while idle sessions expire', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-heartbeat-'));
   const dataRoot = path.join(temp, 'data');
   const mock = path.join(temp, 'claude-mock.mjs');
-  fs.writeFileSync(mock, ['#!/usr/bin/env node', 'setInterval(() => {}, 1000);'].join('\n'));
+  fs.writeFileSync(mock, [
+    '#!/usr/bin/env node',
+    "setInterval(() => process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } }] } }) + '\\n'), 100);",
+  ].join('\n'));
   fs.chmodSync(mock, 0o755);
 
   const previous = process.env.CLAUDE_BIN;
@@ -169,16 +172,44 @@ test('job status polling renews a background lease and idle sessions expire', as
       leaseTimeoutMs: 1000,
     });
     await waitFor(() => service.jobs.get(created.jobId).status === 'running');
-    for (let index = 0; index < 3; index += 1) {
-      service.status(created.jobId, { renewLease: true });
-      await new Promise((resolve) => setTimeout(resolve, 400));
-    }
+    await new Promise((resolve) => setTimeout(resolve, 2200));
     assert.ok(['starting', 'running'].includes(service.jobs.get(created.jobId).status));
+    service.cancel(created.jobId, 'test_finished');
     const stopped = await waitFor(() => {
       const status = service.jobs.get(created.jobId);
       return status.status === 'cancelled' ? status : null;
     }, 3000);
-    assert.equal(stopped.cancellationReason, 'lease_expired');
+    assert.equal(stopped.cancellationReason, 'test_finished');
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_BIN;
+    else process.env.CLAUDE_BIN = previous;
+  }
+});
+
+test('job wait blocks inside the service and returns one compact terminal result', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-job-wait-'));
+  const dataRoot = path.join(temp, 'data');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, [
+    '#!/usr/bin/env node',
+    "setTimeout(() => process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'wait complete', session_id: 'wait-session', num_turns: 2 }) + '\\n'), 150);",
+  ].join('\n'));
+  fs.chmodSync(mock, 0o755);
+  const previous = process.env.CLAUDE_BIN;
+  process.env.CLAUDE_BIN = mock;
+  try {
+    const service = new ClaudeAgentService({ pluginRoot, dataRoot });
+    const created = await service.run({
+      agent: '后端工程师',
+      task: 'Wait in the service',
+      plan: '1. Run the mock.',
+      cwd: temp,
+      background: true,
+    });
+    const waited = await service.wait(created.jobId, { timeoutMs: 3000 });
+    assert.equal(waited.meta.status, 'completed');
+    assert.equal(waited.result.summary, 'wait complete');
+    assert.equal(waited.result.structured, undefined);
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_BIN;
     else process.env.CLAUDE_BIN = previous;
@@ -406,4 +437,75 @@ test('foreground execution stores the full result but exposes a compact view', a
     if (previous === undefined) delete process.env.CLAUDE_BIN;
     else process.env.CLAUDE_BIN = previous;
   }
+});
+
+test('a second service instance can cancel a persisted foreground runner process', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-cross-cancel-'));
+  const dataRoot = path.join(temp, 'data');
+  const startedFile = path.join(temp, 'started');
+  const stoppedFile = path.join(temp, 'stopped');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.writeFileSync(process.env.MOCK_STARTED_PATH, 'started');
+process.once('SIGTERM', () => { fs.writeFileSync(process.env.MOCK_STOPPED_PATH, 'stopped'); process.exit(0); });
+setInterval(() => {}, 1000);
+`);
+  fs.chmodSync(mock, 0o755);
+
+  const previous = {
+    bin: process.env.CLAUDE_BIN,
+    started: process.env.MOCK_STARTED_PATH,
+    stopped: process.env.MOCK_STOPPED_PATH,
+  };
+  process.env.CLAUDE_BIN = mock;
+  process.env.MOCK_STARTED_PATH = startedFile;
+  process.env.MOCK_STOPPED_PATH = stoppedFile;
+  try {
+    const owner = new ClaudeAgentService({ pluginRoot, dataRoot });
+    const running = owner.run({
+      agent: '后端工程师',
+      task: 'Wait for cross-instance cancellation',
+      plan: '1. Wait. 2. Be cancelled.',
+      cwd: temp,
+    });
+    await waitFor(() => fs.existsSync(startedFile));
+    const active = await waitFor(() => owner.jobs.list(1).find((meta) => meta.runnerPid));
+    assert.equal(active.status, 'running');
+
+    const observer = new ClaudeAgentService({ pluginRoot, dataRoot });
+    const cancelled = observer.cancel(active.jobId, 'user_requested');
+    assert.equal(cancelled.ok, true);
+    assert.equal(cancelled.signalled, true);
+    await waitFor(() => fs.existsSync(stoppedFile));
+
+    const result = await running;
+    assert.equal(result.status, 'cancelled');
+    assert.equal(result.cancelled, true);
+    assert.equal(owner.jobs.get(active.jobId).status, 'cancelled');
+  } finally {
+    for (const [key, value] of Object.entries({ CLAUDE_BIN: previous.bin, MOCK_STARTED_PATH: previous.started, MOCK_STOPPED_PATH: previous.stopped })) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('orphan reconciliation closes dead active jobs without touching live or persistent jobs', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-orphans-'));
+  const service = new ClaudeAgentService({ pluginRoot, dataRoot: path.join(temp, 'data') });
+  const create = (task) => service.jobs.create({ agent: 'backend-engineer', task, cwd: temp, planSha256: task });
+  const dead = create('dead');
+  service.jobs.writeMeta(dead.jobId, { status: 'running', startedAt: new Date(0).toISOString(), mode: 'foreground', runnerPid: 999_999_999 });
+  const live = create('live');
+  service.jobs.writeMeta(live.jobId, { status: 'running', startedAt: new Date(0).toISOString(), mode: 'foreground', runnerPid: process.pid });
+  const persistent = create('persistent');
+  service.jobs.writeMeta(persistent.jobId, { status: 'running', startedAt: new Date(0).toISOString(), mode: 'foreground', runnerPid: 999_999_998, persistOnDisconnect: true });
+
+  const reconciled = service.reconcileOrphans({ graceMs: 0 });
+  assert.deepEqual(reconciled.reconciled, [dead.jobId]);
+  assert.equal(service.jobs.get(dead.jobId).status, 'cancelled');
+  assert.equal(service.jobs.get(dead.jobId).cancellationReason, 'orphaned_process');
+  assert.equal(service.jobs.get(live.jobId).status, 'running');
+  assert.equal(service.jobs.get(persistent.jobId).status, 'running');
 });

@@ -233,7 +233,8 @@ QA_ENGINEER_BROWSER_MCP_CONFIGS_JSON={"playwright":"/absolute/path/to/playwright
 |---|---|
 | `list_agents` | 列出可用智能体及其非秘密运行配置。 |
 | `run_agent` | 把已批准计划委派给一个专业智能体。 |
-| `job_status` | 返回后台任务的紧凑进度。 |
+| `job_status` | 只读返回后台任务的紧凑进度。 |
+| `job_wait` | 在 MCP 服务端等待后台任务终态并返回一次紧凑结果。 |
 | `job_result` | 返回持久化的终态结果。 |
 | `job_cancel` | 取消正在运行的后台任务。 |
 
@@ -250,16 +251,18 @@ browserMode, browserMcpProfile
 
 ### 后台任务
 
-正常编排使用 `background=true`。调用会返回 Job ID 和自适应的 `nextPollSeconds`，Codex 通过 `job_status` 获取紧凑进度并续租非持久任务，在终态时调用一次 `job_result`；停止轮询后租约会过期并终止 Worker。
+顺序任务默认使用 `background=false`，MCP 请求保持挂起，Agent 完成后只恢复一次 Codex 回合。需要并行或显式进度观察时使用 `background=true`；调用返回 Job ID 后，Codex 只调用一次 `job_wait`，由 MCP 服务端等待终态并返回紧凑结果。`job_status` 只读，后台 Worker 根据活动自行续租，不依赖 Codex 轮询。
 
-只有用户明确要求单次阻塞等待且不显示进度时，才使用 `background=false`。只有用户明确要求任务脱离 Codex 会话继续运行时，才使用 `persistOnDisconnect=true`。
+只有需要先返回 Job ID、并行运行或显式查看进度时，才使用 `background=true`。只有用户明确要求任务脱离 Codex 会话继续运行时，才使用 `persistOnDisconnect=true`。
 
-任务数据默认写入 Codex 提供的 `PLUGIN_DATA` 目录。直接执行时回退到 `~/.codex/claude-code-agents`。
+任务数据默认写入 Codex 提供的 `PLUGIN_DATA` 目录。直接执行时回退到 `~/.codex/claude-code-agents`。历史保留是显式操作：`node plugins/claude-code-agents/server/cli.mjs cleanup --before ISO_DATE` 只删除过期终态任务及其事件，不自动运行，也不会删除活动任务。
 
 ## 诊断
 
 ```bash
 npm test
+npm run check
+npm run coverage
 npm run doctor
 npm run list-agents
 npm run dry-run
@@ -311,3 +314,11 @@ node plugins/claude-code-agents/server/cli.mjs run \
 ## 许可证
 
 MIT
+
+## 第一阶段 Runner
+
+执行链现在按“角色 + Runner”编排。省略 `runner` 的旧调用仍然使用 Claude；显式传入 `runner: "codex"` 才使用 Codex adapter。`list_runners` 会返回可用 Runner 和能力声明。Codex adapter 调用 `codex exec --json`，把选定角色 XML 注入 prompt，不伪造原生 `--agents` 配置。
+
+Runner 配置优先级为：Runner 默认值、角色默认 Runner、角色×Runner 配置、进程环境、单次非秘密覆盖。现有 `CLAUDE_DEFAULT_*` 与 `<ROLE>_*` 变量继续兼容。Codex 不支持 Claude 浏览器模式、effort、resume/session ID 或任意 native CLI 参数；不支持的请求会返回明确错误。
+
+Codex 所需凭据（若本机 CLI 需要）只进入子进程环境。native CLI 参数仅由受信 adapter 和配置生成，MCP 调用方不能注入任意 native options。

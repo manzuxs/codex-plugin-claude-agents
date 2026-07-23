@@ -1,4 +1,5 @@
 import { compactResult } from './service.mjs';
+import { PLUGIN_VERSION } from './version.mjs';
 
 const TOOL_DEFINITIONS = [
   {
@@ -11,30 +12,39 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: 'list_runners',
+    description: 'List available execution runners and their declared capabilities.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'list_agents',
     description: 'List configured Claude Code specialist agents and their non-secret runtime settings.',
     inputSchema: {
       type: 'object',
-      properties: { cwd: { type: 'string', description: 'Repository working directory.' } },
+      properties: {
+        cwd: { type: 'string', description: 'Repository working directory.' },
+        runner: { type: 'string', enum: ['claude', 'codex'], description: 'Optional runner preview; omit to show the configured default.' },
+      },
       additionalProperties: false,
     },
   },
   {
     name: 'run_agent',
-    description: 'Delegate an approved Codex implementation plan to a selected local Claude Code CLI specialist. The orchestration skill normally passes background=true for adaptive progress polling; use background=false for explicit no-poll waiting. A non-empty plan is mandatory.',
+    description: 'Delegate an approved Codex implementation plan to a selected local Claude Code CLI specialist. Sequential work normally uses background=false for one server-side wait; use background=true for parallel or explicitly monitored work, then call job_wait once. A non-empty plan is mandatory.',
     inputSchema: {
       type: 'object',
       required: ['agent', 'task', 'plan'],
       properties: {
-        agent: { type: 'string', description: 'Agent id or alias, e.g. backend-engineer or 后端工程师.' },
+        agent: { type: 'string', description: 'Role id or alias, e.g. backend-engineer or 后端工程师. Kept as the legacy compatibility field.' },
+        runner: { type: 'string', enum: ['claude', 'codex'], default: 'claude', description: 'Explicit execution runner. Omit to preserve Claude compatibility.' },
         task: { type: 'string', minLength: 1, description: 'The concrete implementation objective.' },
         plan: { type: 'string', minLength: 1, description: 'The plan already produced and approved by Codex.' },
         acceptanceCriteria: { type: 'string' },
         context: { type: 'string' },
         cwd: { type: 'string', description: 'Target repository. Defaults to the current directory.' },
-        background: { type: 'boolean', default: false },
+        background: { type: 'boolean', default: false, description: 'Use false for normal sequential work so the MCP request waits once; use true only for parallel or explicitly monitored jobs.' },
         persistOnDisconnect: { type: 'boolean', default: false, description: 'Allow a background job to continue after the Codex session stops. Use only when explicitly requested.' },
-        leaseTimeoutMs: { type: 'integer', minimum: 30000, maximum: 600000, default: 300000, description: 'Background job lease renewed by explicit job_status polling; it expires when the Codex session stops polling.' },
+        leaseTimeoutMs: { type: 'integer', minimum: 30000, maximum: 600000, default: 300000, description: 'Background job lease renewed by Worker activity. It expires when the Worker is idle or the MCP owner disconnects.' },
         dryRun: { type: 'boolean', default: false },
         codexReviewRequired: { type: 'boolean', default: true },
         resume: { type: 'string', description: 'Optional Claude session id or selector to resume.' },
@@ -64,15 +74,29 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'job_status',
-    description: 'Show compact Claude Code background job progress and renew its non-persistent lease. Use since_progress_revision and poll_attempt to follow the adaptive 30/60/120/180 second schedule; stopping polling lets the lease expire.',
+    description: 'Show compact Claude Code background job progress. This is read-only; use job_wait for one server-side wait instead of repeatedly polling from Codex.',
     inputSchema: {
       type: 'object',
       properties: {
         job_id: { type: 'string' },
-        since_progress_revision: { type: 'integer', minimum: 0, description: 'The progressRevision returned by the previous status response.' },
-        poll_attempt: { type: 'integer', minimum: 0, maximum: 3, default: 0, description: 'The previous poll attempt used to calculate nextPollSeconds.' },
+        since_progress_revision: { type: 'integer', minimum: 0, description: 'Optional previous progressRevision for detecting visible changes.' },
+        poll_attempt: { type: 'integer', minimum: 0, maximum: 3, default: 0, description: 'Optional diagnostic poll counter used to calculate nextPollSeconds.' },
         full: { type: 'boolean', default: false, description: 'Include all stored metadata for diagnostics.' },
         limit: { type: 'integer', minimum: 1, maximum: 20, default: 5 },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'job_wait',
+    description: 'Wait for a background Claude Code job to reach a terminal state inside the MCP server and return one compact result. This avoids repeated Codex polling turns.',
+    inputSchema: {
+      type: 'object',
+      required: ['job_id'],
+      properties: {
+        job_id: { type: 'string' },
+        timeout_ms: { type: 'integer', minimum: 1000, maximum: 2100000, default: 2100000, description: 'Maximum server-side wait time. It does not create additional Codex model turns.' },
+        max_text_chars: { type: 'integer', minimum: 1000, maximum: 50000, default: 8000 },
       },
       additionalProperties: false,
     },
@@ -135,14 +159,15 @@ export class McpServer {
     const { id, method, params = {} } = message;
     if (method === 'notifications/initialized') return;
     if (method === 'notifications/cancelled') {
-      this.activeRequests.get(params.requestId)?.abort('mcp_request_cancelled');
+      const request = this.activeRequests.get(params.requestId);
+      request?.controller.abort('mcp_request_cancelled');
       return;
     }
     if (method === 'initialize') {
       this.success(id, {
         protocolVersion: params.protocolVersion || '2025-06-18',
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'claude-code-agents', version: '0.1.0' },
+        serverInfo: { name: 'claude-code-agents', version: PLUGIN_VERSION },
         instructions: 'Codex must plan first. Use run_agent only after producing a concrete plan, selecting a specialist, and preserving user scope. Review the returned implementation and verification evidence.',
       });
       return;
@@ -170,10 +195,11 @@ export class McpServer {
           }
           value = { ok: true, url: this.dashboard.url, message: 'Claude Agents dashboard is ready.' };
         }
-        else if (name === 'list_agents') value = this.service.listAgents({ cwd: args.cwd });
+        else if (name === 'list_runners') value = this.service.listRunners();
+        else if (name === 'list_agents') value = this.service.listAgents({ cwd: args.cwd, runner: args.runner });
         else if (name === 'run_agent') {
           const controller = new AbortController();
-          this.activeRequests.set(id, controller);
+          this.activeRequests.set(id, { controller, foreground: !args.background });
           try {
             value = await this.service.run({ ...args, cwd: args.cwd || process.cwd(), signal: controller.signal });
             if (!args.background && !value?.dryRun) value = compactResult(value);
@@ -186,8 +212,20 @@ export class McpServer {
           limit: args.limit,
           sinceRevision: args.since_progress_revision,
           pollAttempt: args.poll_attempt,
-          renewLease: true,
         });
+        else if (name === 'job_wait') {
+          const controller = new AbortController();
+          this.activeRequests.set(id, { controller, foreground: !args.background });
+          try {
+            value = await this.service.wait(args.job_id, {
+              signal: controller.signal,
+              timeoutMs: args.timeout_ms,
+              maxTextChars: args.max_text_chars,
+            });
+          } finally {
+            this.activeRequests.delete(id);
+          }
+        }
         else if (name === 'job_result') value = this.service.result(args.job_id, { full: args.full, maxTextChars: args.max_text_chars });
         else if (name === 'job_cancel') value = this.service.cancel(args.job_id);
         else throw new Error(`Unknown tool: ${name}`);
@@ -222,7 +260,7 @@ export class McpServer {
   shutdown(reason) {
     if (this.stopped) return;
     this.stopped = true;
-    for (const controller of this.activeRequests.values()) controller.abort(reason);
+    for (const request of this.activeRequests.values()) request.controller.abort(reason);
     this.service.dispose(reason);
     this.dashboard?.server?.close();
     const deadline = Date.now() + 5000;

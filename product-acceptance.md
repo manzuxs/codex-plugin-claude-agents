@@ -22,10 +22,10 @@
 
 ## 证据
 
-- 桌面：`strict-pm-desktop.png`
-- 390px 修复后：`strict-pm-mobile-390-fixed.png`
-- 768px：`strict-pm-tablet-768.png`
-- 自动化测试：46/46 通过
+- 桌面：`.qa-screenshots/strict-pm-desktop.png`
+- 390px 修复后：`.qa-screenshots/strict-pm-mobile-390-fixed.png`
+- 768px：`.qa-screenshots/strict-pm-tablet-768.png`
+- 自动化测试：90/90 通过（含 Dashboard HTTP/SSE、warning 监听器和 SQLite 历史清理边界）
 - 浏览器控制台：0 error，0 warning
 
 ## 保留风险
@@ -33,3 +33,4 @@
 - 当前 SQLite 中原有的 8 条测试历史记录未删除，避免未经确认修改用户数据。
 - API Key 仍以本地 SQLite 明文存储，文件权限为 `0600`；后续可接入系统密钥链，仅在 SQLite 保存引用。
 - 历史测试记录本身没有事件，因此分类标签会显示诚实空态；新任务会正常记录流式事件。
+- 历史任务清理仅通过显式 `cleanup --before ISO_DATE` CLI 或 `JobStore.cleanupTerminal()` 调用执行，默认不自动删除，活动任务不会被清理。

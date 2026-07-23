@@ -1,7 +1,12 @@
 .env
 *.log
 .DS_Store
+**/.DS_Store
 node_modules/
 coverage/
 .tmp/
+.playwright-mcp/
+.product-audit/
+.qa-screenshots/
+*.bak
 plugins/claude-code-agents/.data/

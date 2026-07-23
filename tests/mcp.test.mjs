@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startDashboard } from '../plugins/claude-code-agents/server/dashboard.mjs';
 import { JobStore } from '../plugins/claude-code-agents/server/lib/job-store.mjs';
+import { PLUGIN_VERSION } from '../plugins/claude-code-agents/server/lib/version.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pluginRoot = process.env.CLAUDE_AGENTS_TEST_PLUGIN_ROOT || path.join(root, 'plugins', 'claude-code-agents');
@@ -100,6 +101,101 @@ test('dashboard serves browser modules with JavaScript MIME types', async () => 
   }
 });
 
+test('dashboard enforces token, body, static path, task API, and SSE boundaries', async () => {
+  const agent = { id: 'backend-engineer', name: '后端工程师', prefix: 'BACKEND_ENGINEER' };
+  let capturedRun;
+  const service = {
+    registry: { byId: new Map([[agent.id, agent]]), byAlias: new Map() },
+    config: {
+      filePath: '/tmp/claude-agents.sqlite',
+      effectiveFor: () => ({ model: 'sonnet' }),
+    },
+    jobs: {
+      readEvents: () => ({ events: [{ seq: 1, type: 'system', subtype: 'init' }], cursor: 1 }),
+    },
+    listAgents: () => [agent],
+    runtimeFor: () => ({}),
+    status: (jobId) => jobId ? { jobId, status: 'completed' } : [],
+    writeAgentConfig: () => ({ database: '/tmp/claude-agents.sqlite' }),
+    run: async (input) => { capturedRun = input; return { ok: true, jobId: 'job-1', status: 'starting' }; },
+    cancel: (jobId) => ({ ok: true, jobId, status: 'cancelled' }),
+    deleteJob: (jobId) => ({ ok: true, jobId }),
+    result: (jobId) => ({ meta: { jobId, status: 'completed' }, result: { summary: 'done' } }),
+  };
+  const running = await startDashboard({ pluginRoot, service });
+  try {
+    const page = await fetch(running.url);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-type'), /^text\/html/);
+    const token = (await page.text()).match(/dashboard-token" content="([^"]+)"/)?.[1];
+    assert.ok(token);
+
+    const unauthorized = await fetch(`${running.url}/api/bootstrap`);
+    assert.equal(unauthorized.status, 403);
+    assert.equal((await unauthorized.json()).error, 'Invalid dashboard token.');
+
+    const missing = await fetch(`${running.url}/missing.js`);
+    assert.equal(missing.status, 404);
+    const traversal = await fetch(`${running.url}/%2e%2e/server/index.mjs`);
+    assert.equal(traversal.status, 404);
+
+    const invalidJson = await fetch(`${running.url}/api/config`, {
+      method: 'POST',
+      headers: { 'x-claude-agents-token': token, 'content-type': 'application/json' },
+      body: '{',
+    });
+    assert.equal(invalidJson.status, 400);
+    assert.match((await invalidJson.json()).error, /valid JSON/);
+
+    const oversized = await fetch(`${running.url}/api/config`, {
+      method: 'POST',
+      headers: { 'x-claude-agents-token': token, 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: agent.id, values: { model: 'x'.repeat(256 * 1024) } }),
+    });
+    assert.equal(oversized.status, 400);
+    assert.match((await oversized.json()).error, /too large/);
+
+    const config = await fetch(`${running.url}/api/config`, {
+      method: 'POST',
+      headers: { 'x-claude-agents-token': token, 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: agent.id, values: { model: 'sonnet' } }),
+    });
+    assert.equal(config.status, 200);
+
+    const run = await fetch(`${running.url}/api/run`, {
+      method: 'POST',
+      headers: { 'x-claude-agents-token': token, 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: agent.id, task: 'run', plan: 'inspect', cwd: root }),
+    });
+    assert.equal(run.status, 200);
+    assert.equal((await run.json()).jobId, 'job-1');
+    assert.equal(capturedRun.background, true);
+    assert.equal(capturedRun.outputFormat, 'stream-json');
+
+    const events = await fetch(`${running.url}/api/jobs/job-1/events`, { headers: { 'x-claude-agents-token': token } });
+    assert.equal(events.status, 200);
+    assert.equal((await events.json()).events.length, 1);
+    const result = await fetch(`${running.url}/api/jobs/job-1/result`, { headers: { 'x-claude-agents-token': token } });
+    assert.equal(result.status, 200);
+    assert.equal((await result.json()).result.summary, 'done');
+    const cancel = await fetch(`${running.url}/api/jobs/job-1/cancel`, { method: 'POST', headers: { 'x-claude-agents-token': token } });
+    assert.equal(cancel.status, 200);
+    const deleted = await fetch(`${running.url}/api/jobs/job-1`, { method: 'DELETE', headers: { 'x-claude-agents-token': token } });
+    assert.equal(deleted.status, 200);
+
+    const deniedStream = await fetch(`${running.url}/api/jobs/job-1/stream?token=wrong`);
+    assert.equal(deniedStream.status, 403);
+    const stream = await fetch(`${running.url}/api/jobs/job-1/stream?token=${encodeURIComponent(token)}`);
+    assert.equal(stream.status, 200);
+    const reader = stream.body.getReader();
+    const first = await reader.read();
+    assert.match(new TextDecoder().decode(first.value), /event|data:/);
+    await reader.cancel();
+  } finally {
+    await new Promise((resolve) => running.server.close(resolve));
+  }
+});
+
 test('MCP server initializes, lists tools, and performs a dry-run delegation', async () => {
   const child = spawn(process.execPath, [server], { cwd: root, env: isolatedEnv('dry-run'), stdio: ['pipe', 'pipe', 'pipe'] });
   const messages = [];
@@ -135,12 +231,18 @@ test('MCP server initializes, lists tools, and performs a dry-run delegation', a
   child.kill('SIGTERM');
   assert.equal(stderr, '');
   assert.equal(messages.find((m) => m.id === 1)?.result?.serverInfo?.name, 'claude-code-agents');
+  assert.equal(messages.find((m) => m.id === 1)?.result?.serverInfo?.version, PLUGIN_VERSION);
   const tools = messages.find((m) => m.id === 2)?.result?.tools || [];
   const runAgent = tools.find((tool) => tool.name === 'run_agent');
   assert.ok(runAgent);
   assert.equal(runAgent.inputSchema.properties.persistOnDisconnect.default, false);
   assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.default, 300000);
-  assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.description.includes('job_status'), true);
+  assert.equal(runAgent.inputSchema.properties.leaseTimeoutMs.description.includes('Worker activity'), true);
+  const jobStatus = tools.find((tool) => tool.name === 'job_status');
+  assert.equal(jobStatus.description.includes('read-only'), true);
+  const jobWait = tools.find((tool) => tool.name === 'job_wait');
+  assert.ok(jobWait);
+  assert.equal(jobWait.inputSchema.properties.timeout_ms.default, 2100000);
   assert.deepEqual(runAgent.inputSchema.properties.browserMode.enum, ['none', 'repository', 'chrome', 'mcp']);
   assert.equal(runAgent.inputSchema.properties.browserMode.default, 'none');
   assert.match(runAgent.inputSchema.properties.browserMode.description, /user-configured permission mode/);
@@ -154,7 +256,7 @@ test('MCP server initializes, lists tools, and performs a dry-run delegation', a
   assert.equal(dryRun.agent, 'backend-engineer');
 });
 
-test('background MCP flow exposes progress and adaptive polling hints', async () => {
+test('background MCP flow exposes progress and adaptive polling hints', async (t) => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-mcp-progress-'));
   const dataRoot = path.join(temp, 'data');
   const mock = path.join(temp, 'claude-mock.mjs');
@@ -168,6 +270,14 @@ test('background MCP flow exposes progress and adaptive polling hints', async ()
     cwd: root,
     env: { ...process.env, CLAUDE_BIN: mock, CLAUDE_AGENTS_DATA_ROOT: dataRoot },
     stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  t.after(async () => {
+    if (child.exitCode !== null) return;
+    child.kill('SIGTERM');
+    await Promise.race([
+      new Promise((resolve) => child.once('close', resolve)),
+      new Promise((resolve) => setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 3000)),
+    ]);
   });
   const messages = [];
   let buffer = '';
@@ -202,12 +312,17 @@ test('background MCP flow exposes progress and adaptive polling hints', async ()
   assert.equal(typeof progress.changedSinceLastPoll, 'boolean');
   assert.equal(typeof progress.verificationState, 'string');
 
-  await new Promise((resolve) => setTimeout(resolve, 700));
-  send({ jsonrpc: '2.0', id: 32, method: 'tools/call', params: { name: 'job_status', arguments: {
-    job_id: initial.jobId, since_progress_revision: progress.progressRevision, poll_attempt: progress.pollAttempt,
-  } } });
-  const terminalResponse = await waitFor(() => messages.find((message) => message.id === 32), 3000);
-  const terminal = JSON.parse(terminalResponse.result.content[0].text);
+  let terminal;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const requestId = 320 + attempt;
+    send({ jsonrpc: '2.0', id: requestId, method: 'tools/call', params: { name: 'job_status', arguments: {
+      job_id: initial.jobId, since_progress_revision: progress.progressRevision, poll_attempt: progress.pollAttempt,
+    } } });
+    const terminalResponse = await waitFor(() => messages.find((message) => message.id === requestId), 3000);
+    terminal = JSON.parse(terminalResponse.result.content[0].text);
+    if (terminal.status === 'completed') break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
   assert.equal(terminal.status, 'completed');
   assert.equal(terminal.phase, 'completed');
   assert.equal(terminal.nextPollSeconds, null);
@@ -216,7 +331,48 @@ test('background MCP flow exposes progress and adaptive polling hints', async ()
   const resultResponse = await waitFor(() => messages.find((message) => message.id === 33), 3000);
   const result = JSON.parse(resultResponse.result.content[0].text);
   assert.equal(result.result.summary, 'background mcp complete');
+});
+
+test('job_wait returns one terminal result without Codex polling', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-mcp-wait-'));
+  const dataRoot = path.join(temp, 'data');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, [
+    '#!/usr/bin/env node',
+    "setTimeout(() => process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'server waited', session_id: '77777777-7777-4777-8777-777777777777', num_turns: 1 }) + '\\n'), 150);",
+  ].join('\n'));
+  fs.chmodSync(mock, 0o755);
+  const child = spawn(process.execPath, [server], {
+    cwd: root,
+    env: { ...process.env, ...isolatedEnv('wait', { CLAUDE_BIN: mock, CLAUDE_AGENTS_DATA_ROOT: dataRoot }) },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const messages = [];
+  let buffer = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk;
+    let i;
+    while ((i = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, i).trim(); buffer = buffer.slice(i + 1);
+      if (line) messages.push(JSON.parse(line));
+    }
+  });
+  const send = (message) => child.stdin.write(JSON.stringify(message) + '\n');
+  send({ jsonrpc: '2.0', id: 50, method: 'tools/call', params: { name: 'run_agent', arguments: {
+    agent: '后端工程师', task: 'Run and wait in the server', plan: '1. Run the mock.', cwd: temp, background: true,
+  } } });
+  const started = await waitFor(() => messages.find((message) => message.id === 50), 3000);
+  const initial = JSON.parse(started.result.content[0].text);
+  send({ jsonrpc: '2.0', id: 51, method: 'tools/call', params: { name: 'job_wait', arguments: {
+    job_id: initial.jobId, timeout_ms: 3000,
+  } } });
+  const waited = await waitFor(() => messages.find((message) => message.id === 51), 5000);
   child.kill('SIGTERM');
+  const result = JSON.parse(waited.result.content[0].text);
+  assert.equal(result.meta.status, 'completed');
+  assert.equal(result.result.summary, 'server waited');
+  assert.equal(result.result.structured, undefined);
 });
 
 test('MCP cancellation notification stops an active run_agent request', async () => {
@@ -315,6 +471,52 @@ setInterval(() => {}, 1000);
   assert.equal(stopped.cancellationReason, 'mcp_stdin_closed');
   await waitFor(() => fs.existsSync(stoppedFile));
   store.close();
+});
+
+test('closing the MCP session cancels an active foreground runner process', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-mcp-foreground-disconnect-'));
+  const dataRoot = path.join(temp, 'data');
+  const startedFile = path.join(temp, 'started');
+  const stoppedFile = path.join(temp, 'stopped');
+  const mock = path.join(temp, 'claude-mock.mjs');
+  fs.writeFileSync(mock, `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.writeFileSync(process.env.MOCK_STARTED_PATH, 'started');
+process.once('SIGTERM', () => { fs.writeFileSync(process.env.MOCK_STOPPED_PATH, 'stopped'); process.exit(0); });
+setInterval(() => {}, 1000);
+`);
+  fs.chmodSync(mock, 0o755);
+
+  const child = spawn(process.execPath, [server], {
+    cwd: root,
+    env: { ...isolatedEnv('foreground-disconnect'), CLAUDE_BIN: mock, CLAUDE_AGENTS_DATA_ROOT: dataRoot, MOCK_STARTED_PATH: startedFile, MOCK_STOPPED_PATH: stoppedFile },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  try {
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 41, method: 'tools/call', params: { name: 'run_agent', arguments: {
+      agent: '后端工程师', task: 'Stop foreground work with the MCP session', plan: '1. Wait for disconnect.', cwd: temp, background: false,
+    } } }) + '\n');
+    await waitFor(() => fs.existsSync(startedFile), 3000);
+    child.stdin.end();
+    await Promise.race([
+      new Promise((resolve) => child.once('close', resolve)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('MCP server did not exit after stdin closed')), 5000)),
+    ]);
+
+    const store = new JobStore(dataRoot);
+    try {
+      const stopped = await waitFor(() => {
+        const [latest] = store.list(1);
+        return latest?.status === 'cancelled' ? latest : null;
+      }, 3000);
+      assert.equal(stopped.cancellationReason, 'mcp_stdin_closed');
+      await waitFor(() => fs.existsSync(stoppedFile), 3000);
+    } finally {
+      store.close();
+    }
+  } finally {
+    if (child.exitCode === null) child.kill('SIGKILL');
+  }
 });
 
 test('foreground MCP run returns one compact result and stores full diagnostics locally', async () => {

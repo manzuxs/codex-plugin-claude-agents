@@ -62,9 +62,9 @@ claude -p
 
 ## 4. 默认前台与后台任务
 
-正常委派显式使用后台模式：`run_agent(background=true)` 立即返回 Job ID，Codex 按返回的 `nextPollSeconds` 自动调用 `job_status`，轮询间隔自适应为 30、60、120、180 秒。状态无变化时静默等待，阶段变化时发送一行更新，终态后只调用一次 `job_result`；状态接口只返回紧凑进度，不返回原始日志或工具输入。
+顺序委派默认使用前台模式：`run_agent(background=false)` 由 MCP 服务端等待 Agent 完成，Codex 只恢复一次并接收紧凑结果。需要并行或先返回 Job ID 时使用 `run_agent(background=true)`，随后只调用一次 `job_wait`；状态接口只返回紧凑进度，不返回原始日志或工具输入。
 
-如果用户明确要求“不轮询”“静默等待”或“完成后再告诉我”，使用 `run_agent(background=false)`。MCP 请求保持挂起，Agent 完成后只恢复一次 Codex 回合。
+需要用户实时查看进度时，才使用 `job_status`；它是只读查询，不负责续租。
 
 前台任务收到 `notifications/cancelled` 时会终止 Claude 进程组，完整结果保存在本地 Job 文件中，默认不会返回 `structured`、raw stdout 或完整 stderr。
 
@@ -76,7 +76,7 @@ claude -p
 按上面的计划启用后端工程师智能体后台执行。
 ```
 
-插件返回 job ID 后，Codex 按 `nextPollSeconds` 使用 `job_status`，并在终态调用一次 `job_result`；`job_status` 会续租非持久后台任务，停止轮询后租约过期并终止 Worker；用户也可使用 `job_cancel`。MCP 断开时服务会立即取消其拥有的非持久任务。
+插件返回 job ID 后，Codex 调用一次 `job_wait`，由 MCP 服务端在模型回合之外等待终态并返回结果；后台 Worker 根据活动自行续租，用户仍可使用 `job_cancel`。MCP 断开时服务会立即取消其拥有的非持久任务。
 
 只有明确需要任务脱离 Codex 继续运行时，才要求使用 `persistOnDisconnect=true`。普通任务不要启用持久模式。
 
@@ -118,3 +118,19 @@ claude -p
 UI 视觉验收可把 `agent` 改为 `ui-designer`，优先使用 `mcp`/`chrome` 获取真实页面与截图；前端实现自测可使用 `frontend-engineer`，优先运行仓库 `repository` Playwright/Cypress。三者分别执行视觉验收、实现自测和独立 E2E 门禁。
 
 `chrome` 复用 Claude in Chrome（API 网关环境请改用 MCP）；`mcp` 使用对应角色 `.env` 中预配置的 profile，只有一个时可省略 `browserMcpProfile`。浏览器模式沿用用户配置的权限；如需避免非交互审批阻塞，可把对应角色的 `<PREFIX>_PERMISSION_MODE` 配置为 `bypassPermissions`。缺少依赖或工具注入失败时任务返回 `blocked` 和对应安装提示，不会自动安装，也不会静默切换成 Codex 自身浏览器。
+
+## 8. 显式选择 Runner
+
+旧调用无需修改，默认 Runner 是 Claude：
+
+```json
+{"agent":"backend-engineer","task":"...","plan":"<approved plan>"}
+```
+
+需要使用 Codex CLI 时显式传入：
+
+```json
+{"agent":"backend-engineer","runner":"codex","task":"...","plan":"<approved plan>"}
+```
+
+Codex adapter 固定使用 `codex exec --json`，角色职责通过 prompt 注入。它不提供 Claude 原生 agent、浏览器或任意 native 参数；能力不支持时任务会以清晰错误拒绝。

@@ -4,7 +4,8 @@ import { spawn } from 'node:child_process';
 import { loadAgentRegistry, publicAgentView, resolveAgent, resolveAgentRuntime } from './agents.mjs';
 import { loadLayeredEnv } from './env.mjs';
 import { assertWorkingDirectory } from './paths.mjs';
-import { runClaude } from './claude.mjs';
+import { createRunnerRegistry, listRunners, resolveRunner } from './runners/registry.mjs';
+import { runAgent } from './execution/run-agent.mjs';
 import { buildEvidenceView } from './evidence.mjs';
 import { JobStore } from './job-store.mjs';
 import { ConfigStore } from './config-store.mjs';
@@ -15,6 +16,8 @@ const MAX_COMPACT_RESULT_BYTES = 8192;
 const MAX_COMPACT_STATUS_BYTES = 2048;
 const MAX_COMPACT_STATUS_LIST_BYTES = 8192;
 const DEFAULT_BACKGROUND_LEASE_MS = 300_000;
+const DEFAULT_WAIT_TIMEOUT_MS = 2_100_000;
+const MAX_WAIT_TIMEOUT_MS = 2_100_000;
 const ACTIVE_JOB_STATUSES = new Set(['starting', 'running', 'queued']);
 const POLL_SCHEDULE_SECONDS = [30, 60, 120, 180];
 const TRUNCATION_MARKER = '\n[输出已截断]';
@@ -78,7 +81,7 @@ function capObject(value, maxBytes, { shrinkKeys, dropKeys, fallback }) {
 
 function compactMeta(meta) {
   if (!meta) return null;
-  const keys = ['jobId', 'status', 'agent', 'task', 'cwd', 'browserMode', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'durationMs', 'turns', 'turnsObserved', 'costUsd', 'inputTokens', 'outputTokens', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'browserCapability', 'browserBackend', 'installationHint', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
+  const keys = ['jobId', 'status', 'role', 'agent', 'runner', 'model', 'capabilitiesUsed', 'task', 'cwd', 'browserMode', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'durationMs', 'turns', 'turnsObserved', 'costUsd', 'inputTokens', 'outputTokens', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'browserCapability', 'browserBackend', 'installationHint', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
   const compact = Object.fromEntries(keys.filter((key) => meta[key] !== undefined).map((key) => [key, meta[key]]));
   if (ACTIVE_JOB_STATUSES.has(meta.status)) compact.elapsedMs = Math.max(Number(meta.elapsedMs || 0), Date.now() - Date.parse(meta.startedAt || meta.createdAt));
   else if (meta.elapsedMs !== undefined) compact.elapsedMs = meta.elapsedMs;
@@ -140,13 +143,57 @@ function statusForResult(result) {
   return result.ok ? 'completed' : 'failed';
 }
 
+function isProcessAlive(pid) {
+  const value = Number(pid);
+  if (!Number.isInteger(value) || value <= 0) return false;
+  try { process.kill(value, 0); return true; } catch (error) { return error.code === 'EPERM'; }
+}
+
+function signalProcessGroup(pid, signal = 'SIGTERM') {
+  const value = Number(pid);
+  if (!Number.isInteger(value) || value <= 0) return false;
+  try {
+    if (process.platform !== 'win32') process.kill(-value, signal);
+    else process.kill(value, signal);
+    return true;
+  } catch {
+    try { process.kill(value, signal); return true; } catch { return false; }
+  }
+}
+
+function waitForDelay(delayMs, signal) {
+  return new Promise((resolve, reject) => {
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      const error = new Error('等待任务结果的请求已取消。');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, delayMs);
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 function capCompactResult(compact, maxBytes = MAX_COMPACT_RESULT_BYTES) {
   return capObject(compact, maxBytes, {
-    shrinkKeys: ['recommendedNextStage', 'summary', 'filesChanged', 'unfinishedItemsAndRisks', 'verificationSummary', 'installationHint', 'outcome', 'sessionId', 'planSha256', 'jobId', 'agent', 'status'],
+    shrinkKeys: ['recommendedNextStage', 'summary', 'filesChanged', 'unfinishedItemsAndRisks', 'verificationSummary', 'installationHint', 'outcome', 'sessionId', 'planSha256', 'jobId', 'agent', 'role', 'runner', 'model', 'status'],
     dropKeys: ['costUsd', 'turns', 'durationMs', 'evidenceOmissions', 'evidenceStructured'],
     fallback: (current) => ({
       status: String(current.status || 'unknown').slice(0, 32),
+      role: String(current.role || current.agent || '').slice(0, 64),
       agent: String(current.agent || '').slice(0, 64),
+      runner: String(current.runner || 'claude').slice(0, 32),
+      model: String(current.model || '').slice(0, 128),
+      capabilitiesUsed: Array.isArray(current.capabilitiesUsed) ? current.capabilitiesUsed.slice(0, 16) : [],
       jobId: String(current.jobId || '').slice(0, 128),
       truncated: true,
       summary: '[结果字段超过输出限制；使用 full=true 进行诊断]',
@@ -162,14 +209,14 @@ export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS, 
   const source = terminal ? {
     ...result,
     text: terminal.result ?? result.text,
-    sessionId: result.sessionId ?? terminal.session_id ?? null,
+    sessionId: result.sessionId ?? terminal.session_id ?? terminal.sessionId ?? terminal.session?.id ?? null,
     costUsd: result.costUsd ?? terminal.total_cost_usd ?? terminal.cost_usd ?? null,
     durationMs: result.durationMs ?? terminal.duration_ms ?? null,
     turns: result.turns ?? terminal.num_turns ?? null,
     verificationSummary: result.verificationSummary ?? terminal.verificationSummary ?? terminal.verification_summary,
   } : result;
   const compact = {};
-  const keys = ['status', 'agent', 'jobId', 'sessionId', 'planSha256', 'durationMs', 'turns', 'costUsd', 'verificationSummary', 'blocked', 'browserCapability', 'browserBackend', 'browserPurpose', 'browserToolUseObserved', 'installationHint'];
+  const keys = ['status', 'role', 'agent', 'runner', 'model', 'capabilitiesUsed', 'jobId', 'sessionId', 'planSha256', 'durationMs', 'turns', 'costUsd', 'verificationSummary', 'blocked', 'browserCapability', 'browserBackend', 'browserPurpose', 'browserToolUseObserved', 'installationHint'];
   compact.status = source.status || statusForResult(source);
   for (const key of keys) if (source[key] !== undefined) compact[key] = key === 'verificationSummary' ? String(source[key]) : source[key];
   const summary = truncateText(source.summary ?? source.text ?? source.error ?? source.stderr, maxTextChars);
@@ -188,12 +235,14 @@ export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS, 
 
 function runtimeOverrides(input) {
   return {
+    runner: input.runner,
     model: input.model,
     effort: input.effort,
     permissionMode: input.permissionMode,
     timeoutMs: input.timeoutMs,
     maxBudgetUsd: input.maxBudgetUsd,
     outputFormat: input.outputFormat,
+    codexBin: input.codexBin,
   };
 }
 
@@ -265,27 +314,34 @@ export class ClaudeAgentService {
     this.registry = loadAgentRegistry(pluginRoot);
     this.jobs = new JobStore(dataRoot);
     this.config = new ConfigStore(dataRoot);
+    this.runners = createRunnerRegistry();
     this.ownedJobs = new Set();
+    this.reconcileOrphans();
   }
 
   runtimeFor(agent, cwd, overrides = {}) {
     const layeredFiles = loadLayeredEnv({ pluginRoot: this.pluginRoot, cwd, processEnv: {} });
     const env = { ...layeredFiles, ...this.config.toEnv(), ...process.env };
-    return resolveAgentRuntime({ agent, env, overrides });
+    return resolveAgentRuntime({ agent, env, overrides, runner: overrides.runner });
   }
 
   writeAgentConfig({ agent, values }) {
     return this.config.writeAgentConfig({ agent, values });
   }
 
-  listAgents({ cwd = process.cwd() } = {}) {
+  listAgents({ cwd = process.cwd(), runner } = {}) {
     const resolvedCwd = assertWorkingDirectory(cwd);
-    return this.registry.agents.map((agent) => publicAgentView(agent, this.runtimeFor(agent, resolvedCwd)));
+    return this.registry.agents.map((agent) => publicAgentView(agent, this.runtimeFor(agent, resolvedCwd, { runner })));
+  }
+
+  listRunners() {
+    return listRunners(this.runners, 'claude');
   }
 
   async run(input) {
     const agent = resolveAgent(this.registry, input.agent);
     const cwd = assertWorkingDirectory(input.cwd);
+    const requestedRunner = input.runner || undefined;
     let runtime = this.runtimeFor(agent, cwd, {
       model: input.model,
       effort: input.effort,
@@ -293,7 +349,12 @@ export class ClaudeAgentService {
       timeoutMs: input.timeoutMs,
       maxBudgetUsd: input.maxBudgetUsd,
       outputFormat: input.outputFormat,
-    });
+      runner: requestedRunner,
+      codexBin: input.codexBin,
+    }, requestedRunner);
+    const actualRunner = requestedRunner || runtime.runner || 'claude';
+    resolveRunner(this.runners, actualRunner);
+    runtime = { ...runtime, runner: actualRunner };
     const browser = resolveBrowserRequest(input, agent, runtime, cwd);
     if (!input.dryRun && browser.browserMode !== 'none') runtime = { ...runtime, outputFormat: 'stream-json' };
     const plan = String(input.plan || '');
@@ -309,6 +370,7 @@ export class ClaudeAgentService {
       sessionId: input.sessionId || '',
       allowedTools: input.allowedTools || [],
       disallowedTools: input.disallowedTools || [],
+      runner: actualRunner,
       ...browser,
       dryRun: Boolean(input.dryRun),
     };
@@ -354,7 +416,7 @@ export class ClaudeAgentService {
         pollAttempt: 0,
       };
     }
-    if (input.dryRun) return await runClaude({ pluginRoot: this.pluginRoot, agent, runtime, request, cwd, signal: input.signal });
+    if (input.dryRun) return await runAgent({ runnerRegistry: this.runners, runner: actualRunner, pluginRoot: this.pluginRoot, agent, runtime, request, cwd, signal: input.signal });
 
     const meta = this.jobs.create({ ...request, cwd, runtimeOverrides: runtimeOverrides(input), persistOnDisconnect: false, mode: 'foreground' });
     this.jobs.writeMeta(meta.jobId, { status: 'starting', mode: 'foreground', persistOnDisconnect: false });
@@ -362,8 +424,15 @@ export class ClaudeAgentService {
     let result;
     try {
       this.jobs.writeMeta(meta.jobId, { status: 'running', startedAt: new Date().toISOString() });
-      result = await runClaude({
+      result = await runAgent({
+        runnerRegistry: this.runners,
+        runner: actualRunner,
         pluginRoot: this.pluginRoot,
+        onSpawn: ({ pid, processGroupId }) => {
+          const current = this.jobs.get(meta.jobId);
+          this.jobs.writeMeta(meta.jobId, { runnerPid: pid, runnerProcessGroupId: processGroupId, runnerOwnerPid: process.pid });
+          if (current.status === 'cancelled') signalProcessGroup(processGroupId || pid, 'SIGTERM');
+        },
         agent,
         runtime,
         request,
@@ -379,9 +448,19 @@ export class ClaudeAgentService {
         },
       });
     } catch (error) {
-      result = { ok: false, agent: agent.id, planSha256: request.planSha256, cwd, error: error.message };
+      result = { ok: false, role: agent.id, agent: agent.id, runner: actualRunner, model: runtime.model, capabilitiesUsed: [], planSha256: request.planSha256, cwd, error: error.message };
     }
-    const status = statusForResult(result);
+    const current = this.jobs.get(meta.jobId);
+    const externallyCancelled = current.status === 'cancelled';
+    if (externallyCancelled) {
+      result = {
+        ...result,
+        ok: false,
+        cancelled: true,
+        cancellationReason: current.cancellationReason || result.cancellationReason || 'user_requested',
+      };
+    }
+    const status = externallyCancelled ? 'cancelled' : statusForResult(result);
     const stored = { ...result, jobId: meta.jobId, status };
     this.jobs.writeResult(meta.jobId, stored);
     this.jobs.writeMeta(meta.jobId, {
@@ -401,18 +480,43 @@ export class ClaudeAgentService {
     return stored;
   }
 
-  status(jobId, { full = false, limit = 5, sinceRevision, pollAttempt = 0, renewLease = false } = {}) {
+  status(jobId, { full = false, limit = 5, sinceRevision, pollAttempt = 0 } = {}) {
     let value;
-    if (jobId) {
-      if (renewLease) {
-        const current = this.jobs.get(jobId);
-        if (ACTIVE_JOB_STATUSES.has(current.status) && !current.persistOnDisconnect) this.jobs.renewLease(jobId);
-      }
-      value = this.jobs.get(jobId);
-    } else value = this.jobs.list(limit);
+    if (jobId) value = this.jobs.get(jobId);
+    else value = this.jobs.list(limit);
     if (full) return value;
     if (Array.isArray(value)) return capStatusList(value.map((meta) => compactMeta({ ...meta, ...pollStatus(meta, { sinceRevision, pollAttempt }) })));
     return compactMeta({ ...value, ...pollStatus(value, { sinceRevision, pollAttempt }) });
+  }
+
+  async wait(jobId, { signal, timeoutMs = DEFAULT_WAIT_TIMEOUT_MS, maxTextChars = DEFAULT_RESULT_TEXT_CHARS } = {}) {
+    const id = String(jobId || '').trim();
+    if (!id) throw new Error('job_id is required.');
+    const timeout = Number(timeoutMs);
+    if (!Number.isInteger(timeout) || timeout < 1000 || timeout > MAX_WAIT_TIMEOUT_MS) {
+      throw new Error(`timeout_ms must be an integer between 1000 and ${MAX_WAIT_TIMEOUT_MS}.`);
+    }
+    const deadline = Date.now() + timeout;
+    while (true) {
+      const meta = this.jobs.get(id);
+      if (!ACTIVE_JOB_STATUSES.has(meta.status)) {
+        const stored = this.jobs.result(id);
+        if (stored.result !== null && stored.result !== undefined) return this.result(id, { maxTextChars });
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        return {
+          meta: compactMeta(this.jobs.get(id)),
+          result: {
+            status: 'waiting',
+            jobId: id,
+            waitTimedOut: true,
+            summary: '等待超时；任务仍在运行，请稍后再次调用 job_wait。',
+          },
+        };
+      }
+      await waitForDelay(Math.min(1000, remaining), signal);
+    }
   }
 
   result(jobId, { full = false, maxTextChars = DEFAULT_RESULT_TEXT_CHARS } = {}) {
@@ -430,18 +534,39 @@ export class ClaudeAgentService {
 
   cancel(jobId, reason = 'user_requested') {
     const meta = this.jobs.get(jobId);
-    if (!meta.pid || !ACTIVE_JOB_STATUSES.has(meta.status)) {
-      return { ok: false, jobId, status: meta.status, message: 'Job is not active.' };
+    if (!ACTIVE_JOB_STATUSES.has(meta.status)) return { ok: false, jobId, status: meta.status, message: 'Job is not active.' };
+    const pid = meta.runnerPid || (meta.mode === 'foreground' ? null : meta.pid);
+    const processGroupId = meta.runnerProcessGroupId || pid;
+    const alive = isProcessAlive(pid);
+    const signalled = alive && signalProcessGroup(processGroupId, 'SIGTERM');
+    const cancellationReason = reason || (alive ? 'user_requested' : 'orphaned_process');
+    const next = this.jobs.writeMeta(jobId, {
+      status: 'cancelled',
+      cancelledAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      cancellationReason,
+    });
+    this.ownedJobs.delete(jobId);
+    return { ok: true, jobId, status: next.status, cancellationReason, signalled, orphaned: !alive };
+  }
+
+  reconcileOrphans({ graceMs = 5000 } = {}) {
+    const now = Date.now();
+    const reconciled = [];
+    for (const meta of this.jobs.list(100)) {
+      if (!ACTIVE_JOB_STATUSES.has(meta.status) || meta.persistOnDisconnect) continue;
+      const age = now - Date.parse(meta.startedAt || meta.createdAt || now);
+      const pid = meta.runnerPid || (meta.mode === 'foreground' ? null : meta.pid);
+      if (!pid && age < graceMs) continue;
+      if (pid && isProcessAlive(pid)) continue;
+      const next = this.jobs.writeMeta(meta.jobId, {
+        status: 'cancelled',
+        finishedAt: new Date().toISOString(),
+        cancellationReason: 'orphaned_process',
+      });
+      reconciled.push(next.jobId);
     }
-    try {
-      if (process.platform !== 'win32') process.kill(-meta.pid, 'SIGTERM');
-      else process.kill(meta.pid, 'SIGTERM');
-      this.jobs.writeMeta(jobId, { status: 'cancelled', cancelledAt: new Date().toISOString(), cancellationReason: reason });
-      this.ownedJobs.delete(jobId);
-      return { ok: true, jobId, status: 'cancelled', cancellationReason: reason };
-    } catch (error) {
-      return { ok: false, jobId, status: meta.status, message: error.message };
-    }
+    return { ok: true, reconciled };
   }
 
   deleteJob(jobId) {
@@ -450,13 +575,16 @@ export class ClaudeAgentService {
     return this.jobs.delete(jobId);
   }
 
+  cleanupJobs(options) {
+    return this.jobs.cleanupTerminal(options);
+  }
+
   dispose(reason = 'mcp_disconnected') {
     for (const jobId of this.ownedJobs) {
       try {
         const meta = this.jobs.get(jobId);
         if (!meta.persistOnDisconnect && ACTIVE_JOB_STATUSES.has(meta.status)) {
-          if (meta.pid) this.cancel(jobId, reason);
-          else this.jobs.writeMeta(jobId, { status: 'cancelled', finishedAt: new Date().toISOString(), cancellationReason: reason });
+          this.cancel(jobId, reason);
         }
       } catch {}
     }
