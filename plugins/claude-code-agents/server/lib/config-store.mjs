@@ -10,10 +10,10 @@ const FIELD_SUFFIX = Object.freeze({
 });
 
 const ENUMS = Object.freeze({
-  effort: new Set(['low', 'medium', 'high', 'xhigh', 'max']),
+  effort: new Set(['default', 'low', 'medium', 'high', 'xhigh', 'max']),
   permissionMode: new Set(['auto', 'plan', 'acceptEdits', 'bypassPermissions']),
   apiKeyKind: new Set(['auth_token', 'api_key']),
-  runner: new Set(['claude', 'codex']),
+  runner: new Set(['claude', 'codex', 'grok', 'agy']),
   outputFormat: new Set(['text', 'json', 'stream-json']),
 });
 
@@ -67,13 +67,16 @@ export class ConfigStore {
     return Object.fromEntries(this.getStatement.all().map((row) => [row.config_key, row.config_value]));
   }
 
-  writeAgentConfig({ agent, values }) {
+  writeAgentConfig({ agent, values, runner }) {
     validateValues(values || {});
     const entries = Object.entries(values || {}).filter(([field]) => FIELD_SUFFIX[field]);
     if (!entries.length) throw new Error('No supported configuration fields were provided.');
+    const normalizedRunner = runner && runner !== 'default' ? String(runner).trim().toUpperCase() : '';
+    if (normalizedRunner && !/^[A-Z][A-Z0-9-]*$/.test(normalizedRunner)) throw new Error('runner is invalid.');
+    const prefix = normalizedRunner ? `${agent.prefix}_${normalizedRunner}` : agent.prefix;
     const now = new Date().toISOString();
     for (const [field, value] of entries) {
-      const key = `${agent.prefix}_${FIELD_SUFFIX[field]}`;
+      const key = `${prefix}_${FIELD_SUFFIX[field]}`;
       if (value === '' || value === null || value === undefined) this.deleteStatement.run(key);
       else this.setStatement.run(key, String(value), now);
     }

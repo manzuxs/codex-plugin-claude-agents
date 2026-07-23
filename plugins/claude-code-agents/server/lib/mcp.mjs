@@ -23,7 +23,7 @@ const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         cwd: { type: 'string', description: 'Repository working directory.' },
-        runner: { type: 'string', enum: ['claude', 'codex'], description: 'Optional runner preview; omit to show the configured default.' },
+        runner: { type: 'string', enum: ['claude', 'codex', 'grok', 'agy'], description: 'Optional runner preview; omit to show the configured default.' },
       },
       additionalProperties: false,
     },
@@ -36,7 +36,7 @@ const TOOL_DEFINITIONS = [
       required: ['agent', 'task', 'plan'],
       properties: {
         agent: { type: 'string', description: 'Role id or alias, e.g. backend-engineer or 后端工程师. Kept as the legacy compatibility field.' },
-        runner: { type: 'string', enum: ['claude', 'codex'], default: 'claude', description: 'Explicit execution runner. Omit to preserve Claude compatibility.' },
+        runner: { type: 'string', enum: ['claude', 'codex', 'grok', 'agy'], description: 'Explicit execution runner. Omit to use the configured default.' },
         task: { type: 'string', minLength: 1, description: 'The concrete implementation objective.' },
         plan: { type: 'string', minLength: 1, description: 'The plan already produced and approved by Codex.' },
         acceptanceCriteria: { type: 'string' },

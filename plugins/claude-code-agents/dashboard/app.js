@@ -3,7 +3,7 @@ import { createDashboardScheduler } from './dashboard-scheduler.mjs';
 
 const token = document.querySelector('meta[name="dashboard-token"]').content;
 const state = {
-  agents: [], jobs: [], install: null, cwd: '', selectedAgent: null, selectedJob: null,
+  agents: [], runners: [], jobs: [], install: null, cwd: '', selectedAgent: null, selectedJob: null,
   events: [], cursor: 0, result: null, tab: 'events', stream: null,
   streamState: 'idle', lastUpdate: null,
   reconnect: createReconnectState(),
@@ -446,9 +446,12 @@ function renderConfigOptions() {
   const select = $('#config-agent'); const previous = select.value;
   select.innerHTML = state.agents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join('');
   select.value = previous || state.selectedAgent || state.agents[0]?.id || '';
+  const runnerSelect = $('#config-runner'); const runnerPrevious = runnerSelect.value || 'default';
+  runnerSelect.innerHTML = `<option value="default">默认 Runner</option>${state.runners.map((runner) => `<option value="${esc(runner.id)}">${esc(runner.name)}${runner.available === false ? '（未安装）' : ''}</option>`).join('')}`;
+  runnerSelect.value = [...runnerSelect.options].some((option) => option.value === runnerPrevious) ? runnerPrevious : 'default';
 }
 function fillConfig() {
-  const agent = state.agents.find((item) => item.id === $('#config-agent').value) || state.agents[0]; const config = agent?.configured || {};
+  const agent = state.agents.find((item) => item.id === $('#config-agent').value) || state.agents[0]; const runner = $('#config-runner').value || 'default'; const config = runner === 'default' ? (agent?.configured || {}) : (agent?.configuredByRunner?.[runner] || {});
   $('#cfg-model').value = config.model || ''; $('#cfg-effort').value = config.effort || 'high'; $('#cfg-permission').value = config.permissionMode || 'auto'; $('#cfg-output').value = config.outputFormat || 'json'; $('#cfg-timeout').value = config.timeoutMs || 1800000; $('#cfg-budget').value = config.maxBudgetUsd ?? 0; $('#cfg-gateway').value = config.gatewayUrl || ''; $('#cfg-key-kind').value = config.apiKeyKind || 'auth_token'; $('#cfg-api-key').value = ''; $('#cfg-browser-profiles').value = config.browserMcpConfigsJson || '{}';
 }
 function renderInstall() {
@@ -499,14 +502,14 @@ function filteredEvents() {
   return state.events.filter((event) => { const kind = eventClass(event); return state.tab === 'tools' ? Boolean(kind.tool) : state.tab === 'files' ? kind.file : kind.check; });
 }
 function renderSession(diff, source) {
-  const agent = state.agents.find((item) => item.id === state.selectedAgent); const job = activeJob(); const status = sessionStatusFor(job?.status, state.streamState); const config = agent?.configured || {};
+  const agent = state.agents.find((item) => item.id === state.selectedAgent); const job = activeJob(); const status = sessionStatusFor(job?.status, state.streamState); const config = agent?.configuredByRunner?.[job?.runner] || agent?.configured || {};
   $('#session-role-icon').className = `session-role-icon ${roleClass(agent?.id || '')}`; $('#session-title').textContent = agent?.name || '智能体会话'; $('#session-task').textContent = job?.task || '该智能体暂无任务记录'; $('#session-meta').textContent = job ? `${job.sessionId || '无会话 ID'} · ${job.cwd || '当前仓库'}` : '点击星图节点查看会话详情';
   $('#session-state').dataset.status = status; $('#session-state').innerHTML = `<i></i><span>${esc(phaseLabel(job?.phase, status))}</span>`;
   const result = state.result || {}; const verification = job?.verificationState; const title = { completed: '任务已完成', failed: '任务执行失败', cancelled: '任务已取消', blocked: '任务已阻断', running: '任务正在执行', starting: '正在启动任务', queued: '任务正在排队' }[status] || '等待任务';
   const summary = String(result.summary || (job ? '该任务暂无保存结果摘要。' : '选择一条任务记录后查看执行结果。'));
   $('#overview-title').textContent = title; $('#overview-summary').textContent = summary.length > 320 ? `${summary.slice(0, 317)}...` : summary; $('#overview-verification').textContent = result.verificationSummary || '';
   $('#overview-status').textContent = phaseLabel(job?.phase, status); $('#overview-duration').textContent = durationText(elapsedFor(job)); $('#overview-check').textContent = verification === 'passed' ? '验证通过' : verification === 'failed' ? '验证失败' : job ? '尚未验证' : '等待执行'; $('#overview-cost').textContent = Number.isFinite(Number(job?.costUsd)) ? `$${Number(job.costUsd).toFixed(4)}` : '—';
-  $('#session-runtime').textContent = `模型 ${config.model || '—'} · 思考强度 ${config.effort || '—'} · 权限 ${config.permissionMode || '—'}`;
+  $('#session-runtime').textContent = `Runner ${job?.runner || config.runner || 'claude'} · 模型 ${config.model || '—'} · 思考强度 ${config.effort || '—'} · 权限 ${config.permissionMode || '—'}`;
   const visible = filteredEvents(); $('#event-count').textContent = state.events.length; $('#tool-count').textContent = state.events.filter((event) => eventClass(event).tool).length; $('#file-count').textContent = state.events.filter((event) => eventClass(event).file).length; $('#check-count').textContent = state.events.filter((event) => eventClass(event).check).length;
   patchKeyedList($('#event-viewport'), visible, (event) => event.seq, (event) => { const [kind, icon, detail] = eventView(event); return `<div class="event-row"><span class="event-time">${esc(timeText(event.at))}</span><span class="event-dot">${esc(icon)}</span><span class="event-kind">${esc(kind)}</span><span class="event-main"><strong>${esc(event.subtype || kind)}</strong><small>${esc(detail)}</small></span><span class="event-result">${event.type === 'result' ? '完成' : ''}</span></div>`; }, '<div class="empty-events"><strong>此分类暂无记录</strong><small>历史快照可能没有完整事件流。</small></div>');
   if (motionAllowed(source)) (diff?.newEvents || []).forEach((event) => triggerMotion(motionElement(`#event-viewport [data-motion-key="${CSS.escape(String(event.seq))}"]`), 'motion-event-enter', motionDuration.enter));
@@ -551,7 +554,7 @@ function connectStream(jobId) {
   state.stream.onerror = () => { state.reconnect.onError(); if (state.streamState !== 'snapshot') state.streamState = 'error'; scheduleRender('sse', { force: true }); };
 }
 async function refreshBootstrap(source = 'poll') {
-  const data = await api('/api/bootstrap'); state.agents = data.agents || []; state.jobs = Array.isArray(data.jobs) ? data.jobs : []; state.cwd = data.cwd || ''; state.install = data.installation || null;
+  const data = await api('/api/bootstrap'); state.agents = data.agents || []; state.runners = data.runners || []; state.jobs = Array.isArray(data.jobs) ? data.jobs : []; state.cwd = data.cwd || ''; state.install = data.installation || null;
   if (!state.selectedAgent || !state.agents.some((agent) => agent.id === state.selectedAgent)) state.selectedAgent = state.agents[0]?.id || null;
   if (state.selectedJob && !state.jobs.some((job) => job.jobId === state.selectedJob)) state.selectedJob = null;
   renderConfigOptions(); renderInstall(); scheduleRender(source);
@@ -564,11 +567,12 @@ async function install() {
 async function saveConfig() {
   const values = { model: $('#cfg-model').value.trim(), effort: $('#cfg-effort').value, permissionMode: $('#cfg-permission').value, outputFormat: $('#cfg-output').value, timeoutMs: $('#cfg-timeout').value, maxBudgetUsd: $('#cfg-budget').value, gatewayUrl: $('#cfg-gateway').value.trim(), apiKeyKind: $('#cfg-key-kind').value, browserMcpConfigsJson: $('#cfg-browser-profiles').value.trim() || '{}' };
   if ($('#cfg-api-key').value) values.apiKey = $('#cfg-api-key').value;
-  try { await post('/api/config', { agent: $('#config-agent').value, values }); showToast('配置已保存到 SQLite，并将用于后续任务。', 'success'); await refreshBootstrap('interaction'); } catch (error) { showToast(error.message, 'error'); }
+  try { await post('/api/config', { agent: $('#config-agent').value, runner: $('#config-runner').value || 'default', values }); showToast('配置已保存到 SQLite，并将用于后续任务。', 'success'); await refreshBootstrap('interaction'); } catch (error) { showToast(error.message, 'error'); }
 }
 
 $('#settings-open').addEventListener('click', () => openSettings('agent'));
 $('#config-agent').addEventListener('change', fillConfig);
+$('#config-runner').addEventListener('change', fillConfig);
 $('#config-save').addEventListener('click', saveConfig);
 $('#install-run').addEventListener('click', install);
 $('#recent-refresh').addEventListener('click', () => refreshBootstrap('interaction').catch((error) => showToast(error.message, 'error')));

@@ -106,8 +106,20 @@ export async function startDashboard({ service, pluginRoot, port = 0, open = fal
       if (url.pathname.startsWith('/api/') && !tokenAccepted) return json(res, 403, { ok: false, error: 'Invalid dashboard token.' });
       if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
         const cwd = url.searchParams.get('cwd') || repoRoot;
+        const runners = service.listRunners ? service.listRunners({ cwd }) : [];
+        const agents = service.listAgents({ cwd });
+        const configuredByAgent = new Map(agents.map((item) => {
+          const resolved = resolveAgent(service.registry, item.id);
+          const configuredByRunner = Object.fromEntries(runners.map((runner) => [
+            runner.id,
+            service.config.effectiveFor(resolved, service.runtimeFor(resolved, cwd, { runner: runner.id })),
+          ]));
+          const configured = configuredByRunner[item.runtime?.runner] || item.configured || configuredByRunner[runners.find((runner) => runner.default)?.id];
+          return [item.id, { configured, configuredByRunner }];
+        }));
         return json(res, 200, {
-          agents: service.listAgents({ cwd }).map((agent) => ({ ...agent, configured: service.config.effectiveFor(resolveAgent(service.registry, agent.id), service.runtimeFor(resolveAgent(service.registry, agent.id), cwd)) })),
+          runners,
+          agents: agents.map((agent) => ({ ...agent, ...configuredByAgent.get(agent.id) })),
           jobs: service.status(undefined, { limit: 100 }), cwd, configFile: service.config.filePath,
           installation: await readInstallation(),
         });
@@ -115,7 +127,7 @@ export async function startDashboard({ service, pluginRoot, port = 0, open = fal
       if (req.method === 'POST' && url.pathname === '/api/config') {
         const body = await readBody(req);
         const agent = resolveAgent(service.registry, body.agent);
-        const stored = service.writeAgentConfig({ agent, values: body.values });
+        const stored = service.writeAgentConfig({ agent, runner: body.runner, values: body.values });
         return json(res, 200, { ok: true, database: stored.database, agents: service.listAgents({ cwd: body.cwd || repoRoot }) });
       }
       if (req.method === 'POST' && url.pathname === '/api/run') {

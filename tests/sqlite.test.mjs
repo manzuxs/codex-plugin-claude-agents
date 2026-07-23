@@ -49,6 +49,16 @@ test('SQLite config store rejects invalid dashboard values and round-trips brows
   assert.equal(store.toEnv().FRONTEND_ENGINEER_BROWSER_MCP_CONFIGS_JSON, '{"playwright":"/tmp/mcp.json"}');
 });
 
+test('SQLite config store isolates role settings by runner', () => {
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-sqlite-runner-config-'));
+  const store = new ConfigStore(dataRoot);
+  const agent = { prefix: 'BACKEND_ENGINEER' };
+  store.writeAgentConfig({ agent, runner: 'codex', values: { model: 'gpt-runner', effort: 'default' } });
+  assert.equal(store.toEnv().BACKEND_ENGINEER_CODEX_MODEL, 'gpt-runner');
+  assert.equal(store.toEnv().BACKEND_ENGINEER_CODEX_EFFORT, 'default');
+  assert.equal(store.toEnv().BACKEND_ENGINEER_MODEL, undefined);
+});
+
 test('SQLite job store keeps ordered stream events and result metadata in one database', () => {
   const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-agent-sqlite-jobs-'));
   const store = new JobStore(dataRoot);

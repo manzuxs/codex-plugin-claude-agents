@@ -1,10 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { envInteger, envJsonObject, envNumber } from './env.mjs';
-
-const ALLOWED_EFFORT = new Set(['default', 'low', 'medium', 'high', 'xhigh', 'max']);
-const ALLOWED_PERMISSION_MODES = new Set(['default', 'acceptEdits', 'auto', 'bypassPermissions', 'dontAsk', 'plan']);
-const ALLOWED_OUTPUT_FORMATS = new Set(['text', 'json', 'stream-json']);
+import { RUNNER_CAPABILITIES } from './runners/capabilities.mjs';
 
 export function loadAgentRegistry(pluginRoot) {
   const filePath = path.join(pluginRoot, 'agents', 'agents.json');
@@ -64,30 +61,79 @@ export function resolveAgentRuntime({ agent, env, overrides = {}, runner }) {
     env.CLAUDE_DEFAULT_RUNNER,
     'claude',
   )).toLowerCase();
-  if (!['claude', 'codex'].includes(runnerId)) throw new Error(`Unknown runner "${runnerId}". Available: claude, codex`);
+  const runnerSpec = RUNNER_CAPABILITIES[runnerId];
+  if (!runnerSpec) throw new Error(`Unknown runner "${runnerId}". Available: ${Object.keys(RUNNER_CAPABILITIES).join(', ')}`);
+  const supports = runnerSpec.supports;
   const runnerPrefix = runnerId.toUpperCase();
   const roleRunnerPrefix = `${p}_${runnerPrefix}`;
-  const model = String(runnerId === 'codex'
-    ? firstNonEmpty(overrides.model, env[`${roleRunnerPrefix}_MODEL`], env[`${runnerPrefix}_DEFAULT_MODEL`], 'gpt-5-codex')
-    : firstNonEmpty(overrides.model, env[`${roleRunnerPrefix}_MODEL`], env[`${p}_MODEL`], env.CLAUDE_DEFAULT_MODEL, 'sonnet'));
-  const effort = validateChoice('effort', String(runnerId === 'codex'
-    ? firstNonEmpty(overrides.effort, env[`${roleRunnerPrefix}_EFFORT`], env[`${runnerPrefix}_DEFAULT_EFFORT`], 'default')
-    : firstNonEmpty(overrides.effort, env[`${roleRunnerPrefix}_EFFORT`], env[`${p}_EFFORT`], env.CLAUDE_DEFAULT_EFFORT, 'high')), ALLOWED_EFFORT);
+  const model = String(firstNonEmpty(
+    overrides.model,
+    env[`${roleRunnerPrefix}_MODEL`],
+    runnerId === 'claude' ? env[`${p}_MODEL`] : undefined,
+    env[`${runnerPrefix}_DEFAULT_MODEL`],
+    runnerId === 'claude' ? env.CLAUDE_DEFAULT_MODEL : undefined,
+    supports.defaultModel,
+    '',
+  ) ?? '');
+  const effort = validateChoice('effort', String(firstNonEmpty(
+    overrides.effort,
+    env[`${roleRunnerPrefix}_EFFORT`],
+    env[`${runnerPrefix}_DEFAULT_EFFORT`],
+    runnerId === 'claude' ? env[`${p}_EFFORT`] : undefined,
+    runnerId === 'claude' ? env.CLAUDE_DEFAULT_EFFORT : undefined,
+    supports.defaultEffort,
+  )), new Set(supports.effort));
   const permissionMode = validateChoice(
     'permission mode',
-    String(firstNonEmpty(overrides.permissionMode, env[`${roleRunnerPrefix}_PERMISSION_MODE`], env[`${runnerPrefix}_DEFAULT_PERMISSION_MODE`], runnerId === 'codex' ? 'auto' : env[`${p}_PERMISSION_MODE`], runnerId === 'codex' ? 'auto' : agent.defaultPermissionMode, env.CLAUDE_DEFAULT_PERMISSION_MODE, 'auto')),
-    ALLOWED_PERMISSION_MODES,
+    String(firstNonEmpty(
+      overrides.permissionMode,
+      env[`${roleRunnerPrefix}_PERMISSION_MODE`],
+      env[`${runnerPrefix}_DEFAULT_PERMISSION_MODE`],
+      runnerId === 'claude' ? env[`${p}_PERMISSION_MODE`] : undefined,
+      runnerId === 'claude' ? agent.defaultPermissionMode : undefined,
+      runnerId === 'claude' ? env.CLAUDE_DEFAULT_PERMISSION_MODE : undefined,
+      'auto',
+    )),
+    new Set(supports.permissionMode),
   );
   const outputFormat = validateChoice(
     'output format',
-    String(firstNonEmpty(overrides.outputFormat, env[`${roleRunnerPrefix}_OUTPUT_FORMAT`], env[`${runnerPrefix}_DEFAULT_OUTPUT_FORMAT`], runnerId === 'codex' ? 'stream-json' : env[`${p}_OUTPUT_FORMAT`], runnerId === 'codex' ? 'stream-json' : env.CLAUDE_DEFAULT_OUTPUT_FORMAT, 'json')),
-    ALLOWED_OUTPUT_FORMATS,
+    String(firstNonEmpty(
+      overrides.outputFormat,
+      env[`${roleRunnerPrefix}_OUTPUT_FORMAT`],
+      env[`${runnerPrefix}_DEFAULT_OUTPUT_FORMAT`],
+      runnerId === 'claude' ? env[`${p}_OUTPUT_FORMAT`] : undefined,
+      runnerId === 'claude' ? env.CLAUDE_DEFAULT_OUTPUT_FORMAT : undefined,
+      supports.defaultOutputFormat,
+    )),
+    new Set(supports.outputFormat),
   );
   const timeoutMs = overrides.timeoutMs ?? envInteger(env, `${roleRunnerPrefix}_TIMEOUT_MS`, envInteger(env, `${runnerPrefix}_DEFAULT_TIMEOUT_MS`, envInteger(env, `${p}_TIMEOUT_MS`, envInteger(env, 'CLAUDE_DEFAULT_TIMEOUT_MS', 1_800_000))));
   const maxBudgetUsd = overrides.maxBudgetUsd ?? envNumber(env, `${roleRunnerPrefix}_MAX_BUDGET_USD`, envNumber(env, `${runnerPrefix}_DEFAULT_MAX_BUDGET_USD`, envNumber(env, `${p}_MAX_BUDGET_USD`, envNumber(env, 'CLAUDE_DEFAULT_MAX_BUDGET_USD', 0))));
-  const gatewayUrl = String(firstNonEmpty(overrides.gatewayUrl, env[`${roleRunnerPrefix}_GATEWAY_URL`], env[`${runnerPrefix}_DEFAULT_GATEWAY_URL`], env[`${p}_GATEWAY_URL`], env.CLAUDE_DEFAULT_GATEWAY_URL, ''));
-  const apiKey = String(firstNonEmpty(overrides.apiKey, env[`${roleRunnerPrefix}_API_KEY`], env[`${runnerPrefix}_DEFAULT_API_KEY`], env[`${p}_API_KEY`], env.CLAUDE_DEFAULT_API_KEY, ''));
-  const apiKeyKind = String(firstNonEmpty(overrides.apiKeyKind, env[`${roleRunnerPrefix}_API_KEY_KIND`], env[`${runnerPrefix}_DEFAULT_API_KEY_KIND`], env[`${p}_API_KEY_KIND`], env.CLAUDE_DEFAULT_API_KEY_KIND, 'auth_token'));
+  const gatewayUrl = String(firstNonEmpty(
+    overrides.gatewayUrl,
+    env[`${roleRunnerPrefix}_GATEWAY_URL`],
+    env[`${runnerPrefix}_DEFAULT_GATEWAY_URL`],
+    runnerId === 'claude' ? env[`${p}_GATEWAY_URL`] : undefined,
+    runnerId === 'claude' ? env.CLAUDE_DEFAULT_GATEWAY_URL : undefined,
+    '',
+  ) ?? '');
+  const apiKey = String(firstNonEmpty(
+    overrides.apiKey,
+    env[`${roleRunnerPrefix}_API_KEY`],
+    env[`${runnerPrefix}_DEFAULT_API_KEY`],
+    runnerId === 'claude' ? env[`${p}_API_KEY`] : undefined,
+    runnerId === 'claude' ? env.CLAUDE_DEFAULT_API_KEY : undefined,
+    '',
+  ) ?? '');
+  const apiKeyKind = String(firstNonEmpty(
+    overrides.apiKeyKind,
+    env[`${roleRunnerPrefix}_API_KEY_KIND`],
+    env[`${runnerPrefix}_DEFAULT_API_KEY_KIND`],
+    runnerId === 'claude' ? env[`${p}_API_KEY_KIND`] : undefined,
+    runnerId === 'claude' ? env.CLAUDE_DEFAULT_API_KEY_KIND : undefined,
+    'auth_token',
+  ));
   if (!['auth_token', 'api_key'].includes(apiKeyKind)) throw new Error('apiKeyKind must be auth_token or api_key');
   const extraEnv = {
     ...envJsonObject(env, 'CLAUDE_DEFAULT_EXTRA_ENV_JSON', {}),
@@ -122,6 +168,8 @@ export function resolveAgentRuntime({ agent, env, overrides = {}, runner }) {
     runner: runnerId,
     claudeBin: String(firstNonEmpty(overrides.claudeBin, env.CLAUDE_BIN, 'claude')),
     codexBin: String(firstNonEmpty(overrides.codexBin, env[`${roleRunnerPrefix}_BIN`], env[`${runnerPrefix}_BIN`], env.CODEX_BIN, 'codex')),
+    grokBin: String(firstNonEmpty(overrides.grokBin, env[`${roleRunnerPrefix}_BIN`], env[`${runnerPrefix}_BIN`], env.GROK_BIN, 'grok')),
+    agyBin: String(firstNonEmpty(overrides.agyBin, env[`${roleRunnerPrefix}_BIN`], env[`${runnerPrefix}_BIN`], env.AGY_BIN, 'agy')),
   };
 }
 

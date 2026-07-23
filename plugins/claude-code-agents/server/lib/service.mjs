@@ -243,6 +243,8 @@ function runtimeOverrides(input) {
     maxBudgetUsd: input.maxBudgetUsd,
     outputFormat: input.outputFormat,
     codexBin: input.codexBin,
+    grokBin: input.grokBin,
+    agyBin: input.agyBin,
   };
 }
 
@@ -325,8 +327,9 @@ export class ClaudeAgentService {
     return resolveAgentRuntime({ agent, env, overrides, runner: overrides.runner });
   }
 
-  writeAgentConfig({ agent, values }) {
-    return this.config.writeAgentConfig({ agent, values });
+  writeAgentConfig({ agent, values, runner }) {
+    if (runner && runner !== 'default') resolveRunner(this.runners, runner);
+    return this.config.writeAgentConfig({ agent, values, runner });
   }
 
   listAgents({ cwd = process.cwd(), runner } = {}) {
@@ -334,8 +337,10 @@ export class ClaudeAgentService {
     return this.registry.agents.map((agent) => publicAgentView(agent, this.runtimeFor(agent, resolvedCwd, { runner })));
   }
 
-  listRunners() {
-    return listRunners(this.runners, 'claude');
+  listRunners({ cwd = process.cwd() } = {}) {
+    const resolvedCwd = assertWorkingDirectory(cwd);
+    const defaultRunner = this.runtimeFor(this.registry.agents[0], resolvedCwd).runner;
+    return listRunners(this.runners, defaultRunner);
   }
 
   async run(input) {
@@ -351,6 +356,8 @@ export class ClaudeAgentService {
       outputFormat: input.outputFormat,
       runner: requestedRunner,
       codexBin: input.codexBin,
+      grokBin: input.grokBin,
+      agyBin: input.agyBin,
     }, requestedRunner);
     const actualRunner = requestedRunner || runtime.runner || 'claude';
     resolveRunner(this.runners, actualRunner);

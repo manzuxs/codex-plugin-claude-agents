@@ -127,10 +127,10 @@ UI 视觉验收可把 `agent` 改为 `ui-designer`，优先使用 `mcp`/`chrome`
 {"agent":"backend-engineer","task":"...","plan":"<approved plan>"}
 ```
 
-需要使用 Codex CLI 时显式传入：
+需要使用其他 CLI 时显式传入：
 
 ```json
 {"agent":"backend-engineer","runner":"codex","task":"...","plan":"<approved plan>"}
 ```
 
-Codex adapter 固定使用 `codex exec --json`，角色职责通过 prompt 注入。它不提供 Claude 原生 agent、浏览器或任意 native 参数；能力不支持时任务会以清晰错误拒绝。
+可选 Runner 为 `claude`、`codex`、`grok` 和 `agy`。角色职责在 Claude 中使用原生 `--agents`，在其他 CLI 中以受控 role prompt 注入。Codex 使用 `codex exec --json`，Grok 使用 headless single-turn JSON/JSONL 输出，Antigravity 使用 `agy --print` 文本输出；浏览器、effort、resume 和权限能力不一致时，adapter 会明确拒绝不支持的请求。

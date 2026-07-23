@@ -9,6 +9,7 @@ import { ClaudeAgentService } from '../server/lib/service.mjs';
 const pluginRoot = resolvePluginRoot(import.meta.url);
 const dataRoot = resolveDataRoot(pluginRoot);
 const claudeBin = process.env.CLAUDE_BIN || 'claude';
+const service = new ClaudeAgentService({ pluginRoot, dataRoot });
 const checks = [];
 function check(name, fn) {
   try { checks.push({ name, ok: true, detail: fn() }); }
@@ -21,7 +22,7 @@ check('Node.js >= 18.18', () => {
   return process.versions.node;
 });
 check('Plugin manifest', () => path.join(pluginRoot, '.codex-plugin', 'plugin.json'));
-check('Agent registry', () => `${new ClaudeAgentService({ pluginRoot, dataRoot }).registry.agents.length} agents`);
+check('Agent registry', () => `${service.registry.agents.length} agents`);
 check('Writable data directory', () => {
   const probe = path.join(dataRoot, `.probe-${process.pid}`);
   fs.writeFileSync(probe, 'ok'); fs.unlinkSync(probe); return dataRoot;
@@ -42,6 +43,7 @@ check('Claude CLI required flags', () => {
   if (missing.length) throw new Error(`Missing flags: ${missing.join(', ')}`);
   return required.join(', ');
 });
+check('Runner CLIs', () => service.listRunners().map((runner) => `${runner.id}: ${runner.available ? runner.version : 'unavailable'}`).join('; '));
 check('Codex compaction guidance', () => {
   const configPath = path.join(os.homedir(), '.codex', 'config.toml');
   if (!fs.existsSync(configPath)) return 'No Codex config found; optional target is 100000-120000 tokens.';

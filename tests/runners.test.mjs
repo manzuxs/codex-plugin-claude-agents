@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCodexInvocation, parseCodexOutput } from '../plugins/claude-code-agents/server/lib/runners/codex.mjs';
+import { buildGrokInvocation, parseGrokOutput } from '../plugins/claude-code-agents/server/lib/runners/grok.mjs';
+import { buildAgyInvocation } from '../plugins/claude-code-agents/server/lib/runners/agy.mjs';
 import { loadAgentRegistry, resolveAgent, resolveAgentRuntime } from '../plugins/claude-code-agents/server/lib/agents.mjs';
 import { ClaudeAgentService } from '../plugins/claude-code-agents/server/lib/service.mjs';
 import { McpServer } from '../plugins/claude-code-agents/server/lib/mcp.mjs';
@@ -153,6 +155,15 @@ test('runner defaults resolve from canonical and legacy configuration layers', a
   assert.equal(legacy.model, 'gpt-legacy');
 });
 
+test('non-Claude runners do not inherit Claude-only role models', () => {
+  const runtime = resolveAgentRuntime({ agent, runner: 'grok', env: {
+    BACKEND_ENGINEER_MODEL: 'claude-role-model',
+    CLAUDE_DEFAULT_MODEL: 'claude-default-model',
+    GROK_DEFAULT_MODEL: 'grok-default-model',
+  } });
+  assert.equal(runtime.model, 'grok-default-model');
+});
+
 test('MCP exposes list_runners, runner preview, and declared capabilities', async () => {
   const server = new McpServer({
     listRunners: () => [{ id: 'claude', capabilities: { model: true } }, { id: 'codex', capabilities: { model: true, browser: ['none'] } }],
@@ -164,10 +175,76 @@ test('MCP exposes list_runners, runner preview, and declared capabilities', asyn
   const runTool = tools.find((tool) => tool.name === 'run_agent');
   const listAgentTool = tools.find((tool) => tool.name === 'list_agents');
   assert.ok(tools.some((tool) => tool.name === 'list_runners'));
-  assert.deepEqual(runTool.inputSchema.properties.runner.enum, ['claude', 'codex']);
-  assert.deepEqual(listAgentTool.inputSchema.properties.runner.enum, ['claude', 'codex']);
+  assert.deepEqual(runTool.inputSchema.properties.runner.enum, ['claude', 'codex', 'grok', 'agy']);
+  assert.deepEqual(listAgentTool.inputSchema.properties.runner.enum, ['claude', 'codex', 'grok', 'agy']);
   await server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_runners', arguments: {} } });
   const runners = JSON.parse(responses[1].result.content[0].text);
   assert.equal(runners[1].id, 'codex');
   assert.deepEqual(runners[1].capabilities.browser, ['none']);
+});
+
+test('Grok and Antigravity invocations preserve role prompts and map native options', () => {
+  const grok = buildGrokInvocation({
+    pluginRoot,
+    agent,
+    runtime: {
+      runner: 'grok', model: 'grok-test', effort: 'high', permissionMode: 'bypassPermissions', outputFormat: 'stream-json',
+      timeoutMs: 30_000, extraEnv: {}, grokBin: 'grok', gatewayUrl: '', apiKey: '',
+    },
+    request: request({ runner: 'grok', sessionId: 'new-session' }),
+  });
+  assert.equal(grok.command, 'grok');
+  assert.ok(grok.args.includes('--single'));
+  assert.equal(grok.args[grok.args.indexOf('--output-format') + 1], 'streaming-json');
+  assert.ok(grok.args.includes('--always-approve'));
+  assert.ok(grok.prompt.includes('<role_protocol>'));
+
+  const agy = buildAgyInvocation({
+    pluginRoot,
+    agent,
+    runtime: {
+      runner: 'agy', model: 'agy-test', effort: 'medium', permissionMode: 'plan', outputFormat: 'text',
+      timeoutMs: 30_000, extraEnv: {}, agyBin: 'agy', gatewayUrl: '', apiKey: '',
+    },
+    request: request({ runner: 'agy', resume: 'latest' }),
+  });
+  assert.equal(agy.command, 'agy');
+  assert.ok(agy.args.includes('--print'));
+  assert.ok(agy.args.includes('--mode') && agy.args.includes('plan'));
+  assert.ok(agy.args.includes('--continue'));
+  assert.ok(agy.prompt.includes('<role_protocol>'));
+});
+
+test('Grok parser keeps the final assistant message and usage metadata', () => {
+  const parsed = parseGrokOutput([
+    JSON.stringify({ type: 'message', message: { role: 'assistant', content: 'intermediate' } }),
+    JSON.stringify({ type: 'turn.completed', text: 'final', usage: { input_tokens: 3, output_tokens: 4 }, session_id: 'grok-session' }),
+  ].join('\n'), 'stream-json');
+  assert.equal(parsed.text, 'final');
+  assert.equal(parsed.sessionId, 'grok-session');
+  assert.equal(parsed.inputTokens, 3);
+  assert.equal(parsed.outputTokens, 4);
+});
+
+test('Grok and Antigravity runners execute through the shared supervisor', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'multi-runner-execution-'));
+  const grokMock = path.join(temp, 'grok-mock.mjs');
+  const agyMock = path.join(temp, 'agy-mock.mjs');
+  fs.writeFileSync(grokMock, [
+    '#!/usr/bin/env node',
+    "process.stdout.write(JSON.stringify({ type: 'message', text: 'grok result' }) + '\\n');",
+    "process.stdout.write(JSON.stringify({ type: 'turn.completed', text: 'grok final', session_id: 'grok-mock-session' }) + '\\n');",
+  ].join('\n'));
+  fs.writeFileSync(agyMock, ['#!/usr/bin/env node', "process.stdout.write('agy result\\n');"].join('\n'));
+  fs.chmodSync(grokMock, 0o755);
+  fs.chmodSync(agyMock, 0o755);
+  const service = new ClaudeAgentService({ pluginRoot, dataRoot: path.join(temp, 'data') });
+  const grok = await service.run({ agent: agent.id, runner: 'grok', grokBin: grokMock, task: 'grok mock', plan: '1. Run.', cwd: temp });
+  assert.equal(grok.status, 'completed');
+  assert.equal(grok.runner, 'grok');
+  assert.equal(grok.text, 'grok final');
+  const agy = await service.run({ agent: agent.id, runner: 'agy', agyBin: agyMock, task: 'agy mock', plan: '1. Run.', cwd: temp });
+  assert.equal(agy.status, 'completed');
+  assert.equal(agy.runner, 'agy');
+  assert.equal(agy.text, 'agy result');
 });

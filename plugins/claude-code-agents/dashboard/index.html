@@ -113,7 +113,7 @@
       <header class="modal-title-row"><div><span class="modal-kicker">SYSTEM SETTINGS</span><h2 id="settings-title">设置中心</h2><p>管理智能体运行参数与 Codex 插件安装状态。</p></div><button class="close-button" data-close="settings-modal" aria-label="关闭设置">×</button></header>
       <div class="settings-tabs" role="tablist"><button class="settings-tab active" data-settings-tab="agent" type="button">智能体参数</button><button class="settings-tab" data-settings-tab="install" type="button">插件安装</button></div>
       <div class="settings-pane active" data-settings-pane="agent">
-        <label class="field-label">选择智能体<select id="config-agent"></select></label>
+        <div class="form-grid config-target-grid"><label class="field-label">选择智能体<select id="config-agent"></select></label><label class="field-label">配置 Runner<select id="config-runner"><option value="default">默认 Runner</option></select></label></div>
         <div class="form-grid">
           <label class="field-label">模型<input id="cfg-model" placeholder="sonnet"></label>
           <label class="field-label">思考强度<select id="cfg-effort"><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option><option value="max">最大</option></select></label>

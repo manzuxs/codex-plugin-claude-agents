@@ -1,8 +1,11 @@
 import { RUNNER_CAPABILITIES } from './capabilities.mjs';
 import { claudeRunner } from './claude.mjs';
 import { codexRunner } from './codex.mjs';
+import { grokRunner } from './grok.mjs';
+import { agyRunner } from './agy.mjs';
+import { spawnSync } from 'node:child_process';
 
-const RUNNERS = Object.freeze({ claude: claudeRunner, codex: codexRunner });
+const RUNNERS = Object.freeze({ claude: claudeRunner, codex: codexRunner, grok: grokRunner, agy: agyRunner });
 
 export function normalizeRunnerName(value) {
   return String(value ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-');
@@ -31,8 +34,26 @@ export function publicRunnerView(runner, { defaultRunner = false } = {}) {
   };
 }
 
-export function listRunners(registry, defaultRunner = 'claude') {
-  return [...registry.values()].map((runner) => publicRunnerView(runner, { defaultRunner: runner.id === defaultRunner }));
+export function detectRunner(runner, { env = process.env } = {}) {
+  const envKey = `${runner.id.toUpperCase()}_BIN`;
+  const command = String(env[envKey] || runner.command);
+  const result = spawnSync(command, ['--version'], { encoding: 'utf8', timeout: 5000 });
+  if (result.error || result.status !== 0) {
+    return {
+      available: false,
+      command,
+      version: null,
+      error: String(result.error?.message || result.stderr || `exit ${result.status ?? 'unknown'}`).trim().slice(0, 256),
+    };
+  }
+  return { available: true, command, version: String(result.stdout || result.stderr || '').trim().split(/\r?\n/)[0].slice(0, 256) };
+}
+
+export function listRunners(registry, defaultRunner = 'claude', { detect = true, env = process.env } = {}) {
+  return [...registry.values()].map((runner) => ({
+    ...publicRunnerView(runner, { defaultRunner: runner.id === defaultRunner }),
+    ...(detect ? detectRunner(runner, { env }) : {}),
+  }));
 }
 
 export { RUNNERS, RUNNER_CAPABILITIES };

@@ -314,10 +314,10 @@ Remove `--dry-run` only when you intend to start the local Claude Code process.
 
 MIT
 
-## Phase 1 runners
+## Multi-CLI runners
 
-Execution is modeled as `role + runner`. Existing calls that omit `runner` remain Claude calls; use `runner: "codex"` to select the Codex adapter explicitly. `list_runners` exposes the available runners and declared capabilities. The Codex adapter invokes `codex exec --json`; the selected role XML is injected into the prompt and is not passed as native `--agents` configuration.
+Execution is modeled as `role + runner`. Existing calls that omit `runner` use the configured default; explicit calls can select `claude`, `codex`, `grok`, or `agy`. `list_runners` exposes actual CLI availability and declared capabilities. Claude uses native `--agents`; Codex invokes `codex exec --json`; Grok uses headless single-turn JSON/JSONL; Antigravity uses `agy --print` text output.
 
-Runner configuration precedence is: runner default, role default runner, role × runner settings, process environment, then one-run non-secret overrides. Existing `CLAUDE_DEFAULT_*` and `<ROLE>_*` variables remain supported. Codex does not support Claude browser modes, effort values, resume/session IDs, or arbitrary native CLI options; unsupported requests return an explicit error.
+Runner configuration precedence is: runner default, role default runner, role × runner settings, process environment, then one-run non-secret overrides. Existing `CLAUDE_DEFAULT_*` and `<ROLE>_*` variables remain supported. Each adapter validates its own model, effort, permission, output, browser, and resume capabilities; unsupported requests return an explicit error instead of silently degrading.
 
 Codex credentials, when required by the installed CLI, remain in its child-process environment. Native CLI arguments are generated only by the trusted adapter and configuration; MCP callers cannot inject arbitrary native options.

@@ -315,10 +315,10 @@ node plugins/claude-code-agents/server/cli.mjs run \
 
 MIT
 
-## 第一阶段 Runner
+## 多 CLI Runner
 
-执行链现在按“角色 + Runner”编排。省略 `runner` 的旧调用仍然使用 Claude；显式传入 `runner: "codex"` 才使用 Codex adapter。`list_runners` 会返回可用 Runner 和能力声明。Codex adapter 调用 `codex exec --json`，把选定角色 XML 注入 prompt，不伪造原生 `--agents` 配置。
+执行链现在按“角色 + Runner”编排。省略 `runner` 的旧调用仍然使用配置的默认 Runner；显式传入 `runner` 可以选择 `claude`、`codex`、`grok` 或 `agy`。`list_runners` 会返回实际 CLI 可用状态和能力声明。Claude 使用原生 `--agents`，Codex 调用 `codex exec --json`，Grok 使用 headless single-turn JSON/JSONL，Antigravity 使用 `agy --print` 文本输出。
 
-Runner 配置优先级为：Runner 默认值、角色默认 Runner、角色×Runner 配置、进程环境、单次非秘密覆盖。现有 `CLAUDE_DEFAULT_*` 与 `<ROLE>_*` 变量继续兼容。Codex 不支持 Claude 浏览器模式、effort、resume/session ID 或任意 native CLI 参数；不支持的请求会返回明确错误。
+Runner 配置优先级为：Runner 默认值、角色默认 Runner、角色×Runner 配置、进程环境、单次非秘密覆盖。现有 `CLAUDE_DEFAULT_*` 与 `<ROLE>_*` 变量继续兼容。不同 Runner 的模型、effort、权限、输出和会话能力由各自 adapter 校验；不支持的请求会返回明确错误，不会静默降级。
 
 Codex 所需凭据（若本机 CLI 需要）只进入子进程环境。native CLI 参数仅由受信 adapter 和配置生成，MCP 调用方不能注入任意 native options。

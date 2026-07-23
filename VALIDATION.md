@@ -77,13 +77,14 @@ A strict mock executable was spawned as a real child process. It rejected unsupp
 
 The local environment provides `claude 2.1.145`, and `npm run doctor` passes. A paid/live Claude model call is only claimed after the installed-cache MCP smoke test completes; mock-based tests do not substitute for that check.
 
-## Phase 1 runner validation
+## Multi-CLI runner validation
 
-- `list_runners` exposes Claude and Codex capability declarations.
+- `list_runners` exposes Claude, Codex, Grok, and Antigravity capability declarations and local availability.
 - Omitting `runner` preserves the Claude adapter and legacy `agent` result field.
 - Explicit `runner: codex` uses `codex exec --json`; role XML is prompt content, not native `--agents` input.
 - Unknown runners and unsupported Codex effort, browser, resume, and session options are rejected clearly.
 - A mock Codex executable can emit JSONL events without a live account; the adapter normalizes role, runner, model, and capabilitiesUsed in foreground and background results.
 - Shared execution supervision keeps `shell: false`, process-tree cancellation, timeout, redaction, and output limits.
+- Grok and Antigravity dry-runs preserve the role protocol and reject unsupported browser/output/session options.
 
 The local Codex CLI was checked with `codex exec --help`; this checkout supports `--json`, `--model`, `--cd`, `--sandbox`, and `--dangerously-bypass-approvals-and-sandbox`; it does not support `--ask-for-approval` or native `--agents`.
