@@ -1,0 +1,78 @@
+plugins/claude-code-agents/server/cli.mjs
+  s_a1388a2ea351ea::t_fe44db9ea304e9 36,49-50,58,73
+  s_a1388a2ea351ea::t_ad9135c92ddba3 51-52
+plugins/claude-code-agents/server/lib/runners/registry.mjs
+  s_a1388a2ea351ea::t_b3ce8a44b3c466 4-5,8
+  s_a1388a2ea351ea::t_c97bdc28ef5618 6,37-56
+QUICKSTART.md
+  s_a1388a2ea351ea::t_88cedbb1d8c24e 130,136
+plugins/claude-code-agents/server/lib/runners/grok.mjs
+  s_a1388a2ea351ea::t_bbd599b59bcaec 46-49
+  s_a1388a2ea351ea::t_d69fdb52d0d287 76
+  s_a1388a2ea351ea::t_94b11b16410e63 1-45,50-75,77-175
+plugins/claude-code-agents/server/lib/runners/agy.mjs
+  s_a1388a2ea351ea::t_c48750342070bb 1-108
+plugins/claude-code-agents/server/lib/service.mjs
+  s_a1388a2ea351ea::t_78f26c995b0902 330,332
+  s_a1388a2ea351ea::t_72511c723065fb 246-247,359-360
+  s_a1388a2ea351ea::t_34daf1a3cac72b 340-343
+  s_a1388a2ea351ea::t_68d307524ca32c 331
+plugins/claude-code-agents/server/lib/mcp.mjs
+  s_a1388a2ea351ea::t_c4ad59bea235fa 26,39
+VALIDATION.md
+  s_a1388a2ea351ea::t_88cedbb1d8c24e 80,82,88
+plugins/claude-code-agents/skills/claude-orchestrator/SKILL.md
+  s_a1388a2ea351ea::t_85b28e81763c24 3,6,10,52-53
+plugins/claude-code-agents/skills/claude-agent-admin/SKILL.md
+  s_a1388a2ea351ea::t_85b28e81763c24 3,6,54-56
+plugins/claude-code-agents/server/lib/runners/capabilities.mjs
+  s_a1388a2ea351ea::t_c02711741ae52e 8,25,42,59
+  s_a1388a2ea351ea::t_c267d563c4d9f9 9,16,26,33-41,43-48,50-58,60-65,67
+  s_a1388a2ea351ea::t_337fc4041d12a0 15,32,49,66
+tests/runners.test.mjs
+  s_a1388a2ea351ea::t_f4057fa2c0144d 178-179
+  s_a1388a2ea351ea::t_d69fdb52d0d287 8-9,185-226
+  s_a1388a2ea351ea::t_03bc92f4c837e3 158-166
+  s_a1388a2ea351ea::t_57bbaec835d1a0 227-250
+tests/sqlite.test.mjs
+  s_a1388a2ea351ea::t_03bc92f4c837e3 52-61
+plugins/claude-code-agents/scripts/doctor.mjs
+  s_a1388a2ea351ea::t_c45e7d15056872 12,25,46
+plugins/claude-code-agents/server/lib/agents.mjs
+  s_a1388a2ea351ea::t_91b617221676db 4,64-66,78-85,88-97,101-109,171-172
+  s_a1388a2ea351ea::t_473fcf14dd3443 69-72,74-76
+  s_a1388a2ea351ea::t_b893d0193d208c 77,120,128
+  s_a1388a2ea351ea::t_2ce94318f22eef 113-119,121-127,129-136
+  s_a1388a2ea351ea::t_962eb8d3d57371 73
+plugins/claude-code-agents/.env.example
+  s_a1388a2ea351ea::t_3aab63fe679c20 84-98
+README.zh-CN.md
+  s_a1388a2ea351ea::t_88cedbb1d8c24e 318,320,322
+plugins/claude-code-agents/server/lib/config-store.mjs
+  s_a1388a2ea351ea::t_1ee0a111b5ffcb 70,74-76,79
+  s_a1388a2ea351ea::t_3bc7da3e2161bb 13,16
+README.md
+  s_a1388a2ea351ea::t_88cedbb1d8c24e 317,319,321
+plugins/claude-code-agents/server/dashboard.mjs
+  s_a1388a2ea351ea::t_8e4b0a5a13f947 109-119,121-122,130
+plugins/claude-code-agents/dashboard/index.html
+  s_a1388a2ea351ea::t_e60517bdc707ec 116
+plugins/claude-code-agents/dashboard/app.js
+  s_a1388a2ea351ea::t_e60517bdc707ec 6,449-451,454,505,512,557,570,575
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ef322e9dbb78f60aac53cefbdec41b19d78626e9",
+  "prompts": {},
+  "sessions": {
+    "s_a1388a2ea351ea": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8d35-48d4-7772-8013-45093a6ffc14",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
