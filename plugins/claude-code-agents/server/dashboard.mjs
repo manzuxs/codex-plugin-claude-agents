@@ -8,8 +8,8 @@ import { resolveAgent } from './lib/agents.mjs';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.png': 'image/png' };
 const MAX_BODY_BYTES = 256 * 1024;
-const MARKETPLACE_NAME = 'local-claude-code-agents';
-const PLUGIN_SELECTOR = `claude-code-agents@${MARKETPLACE_NAME}`;
+const MARKETPLACE_NAME = 'local-multi-cli-agents';
+const PLUGIN_SELECTOR = `multi-cli-agents@${MARKETPLACE_NAME}`;
 
 function json(res, status, value) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -202,5 +202,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const service = new ClaudeAgentService({ pluginRoot, dataRoot: resolveDataRoot(pluginRoot) });
   const requestedPort = Number(process.env.CLAUDE_AGENTS_DASHBOARD_PORT || process.argv[2] || 0);
   const running = await startDashboard({ service, pluginRoot, port: requestedPort, open: process.argv.includes('--open') });
-  console.log(`Claude Agents dashboard: ${running.url}`);
+  console.log(`Multi-CLI Agents dashboard: ${running.url}`);
 }

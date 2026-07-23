@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "claude_code_agents": {
+    "multi_cli_agents": {
       "command": "node",
       "args": ["./server/index.mjs"],
       "cwd": ".",

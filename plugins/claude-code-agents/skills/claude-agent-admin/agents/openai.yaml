@@ -1,8 +1,8 @@
 interface:
-  display_name: "Claude Code Agents 配置"
+  display_name: "Multi-CLI Agents 配置"
   short_description: "配置模型、effort、网关、密钥与智能体"
   brand_color: "#10A37F"
-  default_prompt: "检查并配置 Claude Code Agents 插件，优先使用 dry-run 和非秘密配置视图。"
+  default_prompt: "检查并配置 Multi-CLI Agents 插件，优先使用 dry-run 和非秘密配置视图。"
 policy:
   allow_implicit_invocation: true
 dependencies:

@@ -4,7 +4,7 @@ import { PLUGIN_VERSION } from './version.mjs';
 const TOOL_DEFINITIONS = [
   {
     name: 'open_dashboard',
-    description: 'Open the local Claude Agents command center in a browser. The dashboard shows agent configuration, task history, and streaming execution events.',
+    description: 'Open the local Multi-CLI Agents command center in a browser. The dashboard shows role configuration, Runner history, and streaming execution events.',
     inputSchema: {
       type: 'object',
       properties: { port: { type: 'integer', minimum: 0, maximum: 65535, default: 0 }, open: { type: 'boolean', default: true } },
@@ -18,7 +18,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'list_agents',
-    description: 'List configured Claude Code specialist agents and their non-secret runtime settings.',
+    description: 'List configured specialist roles and their non-secret runtime settings.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -30,7 +30,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'run_agent',
-    description: 'Delegate an approved Codex implementation plan to a selected local Claude Code CLI specialist. Sequential work normally uses background=false for one server-side wait; use background=true for parallel or explicitly monitored work, then call job_wait once. A non-empty plan is mandatory.',
+    description: 'Delegate an approved Codex implementation plan to a selected local CLI Runner and specialist role. Sequential work normally uses background=false for one server-side wait; use background=true for parallel or explicitly monitored work, then call job_wait once. A non-empty plan is mandatory.',
     inputSchema: {
       type: 'object',
       required: ['agent', 'task', 'plan'],
@@ -47,8 +47,8 @@ const TOOL_DEFINITIONS = [
         leaseTimeoutMs: { type: 'integer', minimum: 30000, maximum: 600000, default: 300000, description: 'Background job lease renewed by Worker activity. It expires when the Worker is idle or the MCP owner disconnects.' },
         dryRun: { type: 'boolean', default: false },
         codexReviewRequired: { type: 'boolean', default: true },
-        resume: { type: 'string', description: 'Optional Claude session id or selector to resume.' },
-        sessionId: { type: 'string', description: 'Optional explicit UUID for a new Claude session.' },
+        resume: { type: 'string', description: 'Optional Runner session id or selector to resume when supported.' },
+        sessionId: { type: 'string', description: 'Optional explicit UUID for a new Runner session when supported.' },
         model: { type: 'string', description: 'One-run override; normally loaded from .env.' },
         effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
         permissionMode: { type: 'string', enum: ['default', 'acceptEdits', 'auto', 'bypassPermissions', 'dontAsk', 'plan'] },
@@ -74,7 +74,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'job_status',
-    description: 'Show compact Claude Code background job progress. This is read-only; use job_wait for one server-side wait instead of repeatedly polling from Codex.',
+    description: 'Show compact local CLI Runner background job progress. This is read-only; use job_wait for one server-side wait instead of repeatedly polling from Codex.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -89,7 +89,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'job_wait',
-    description: 'Wait for a background Claude Code job to reach a terminal state inside the MCP server and return one compact result. This avoids repeated Codex polling turns.',
+    description: 'Wait for a background local CLI job to reach a terminal state inside the MCP server and return one compact result. This avoids repeated Codex polling turns.',
     inputSchema: {
       type: 'object',
       required: ['job_id'],
@@ -108,7 +108,7 @@ const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         job_id: { type: 'string' },
-        full: { type: 'boolean', default: false, description: 'Include raw and structured Claude output.' },
+        full: { type: 'boolean', default: false, description: 'Include raw and structured Runner output.' },
         max_text_chars: { type: 'integer', minimum: 1000, maximum: 50000, default: 8000 },
       },
       additionalProperties: false,
@@ -116,7 +116,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'job_cancel',
-    description: 'Cancel an active Claude Code background job.',
+    description: 'Cancel an active local CLI Runner background job.',
     inputSchema: {
       type: 'object',
       required: ['job_id'],
@@ -167,7 +167,7 @@ export class McpServer {
       this.success(id, {
         protocolVersion: params.protocolVersion || '2025-06-18',
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'claude-code-agents', version: PLUGIN_VERSION },
+        serverInfo: { name: 'multi-cli-agents', version: PLUGIN_VERSION },
         instructions: 'Codex must plan first. Use run_agent only after producing a concrete plan, selecting a specialist, and preserving user scope. Review the returned implementation and verification evidence.',
       });
       return;
@@ -193,7 +193,7 @@ export class McpServer {
             const { openDashboardBrowser } = await import('../dashboard.mjs');
             openDashboardBrowser(this.dashboard.url);
           }
-          value = { ok: true, url: this.dashboard.url, message: 'Claude Agents dashboard is ready.' };
+          value = { ok: true, url: this.dashboard.url, message: 'Multi-CLI Agents dashboard is ready.' };
         }
         else if (name === 'list_runners') value = this.service.listRunners();
         else if (name === 'list_agents') value = this.service.listAgents({ cwd: args.cwd, runner: args.runner });

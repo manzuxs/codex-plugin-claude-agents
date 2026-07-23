@@ -1,4 +1,4 @@
-# Claude Code Agents for Codex
+# Multi-CLI Agents for Codex
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
@@ -44,14 +44,14 @@ A local Codex plugin that delegates an approved implementation plan to role-spec
 
 ```bash
 codex plugin marketplace add manzuxs/codex-plugin-claude-agents
-codex plugin add claude-code-agents@local-claude-code-agents
+codex plugin add multi-cli-agents@local-multi-cli-agents
 ```
 
 The full Git URL is also supported:
 
 ```bash
 codex plugin marketplace add https://github.com/manzuxs/codex-plugin-claude-agents.git
-codex plugin add claude-code-agents@local-claude-code-agents
+codex plugin add multi-cli-agents@local-multi-cli-agents
 ```
 
 ### From a local checkout
@@ -60,7 +60,7 @@ codex plugin add claude-code-agents@local-claude-code-agents
 git clone https://github.com/manzuxs/codex-plugin-claude-agents.git
 cd codex-plugin-claude-agents
 codex plugin marketplace add "$(pwd)"
-codex plugin add claude-code-agents@local-claude-code-agents
+codex plugin add multi-cli-agents@local-multi-cli-agents
 ```
 
 Start a new Codex task after installation so the plugin skills and MCP tools are loaded. If Codex still references an older plugin cache path, fully restart the desktop app and open a new task.
@@ -68,8 +68,8 @@ Start a new Codex task after installation so the plugin skills and MCP tools are
 ### Update
 
 ```bash
-codex plugin marketplace upgrade local-claude-code-agents
-codex plugin add claude-code-agents@local-claude-code-agents
+codex plugin marketplace upgrade local-multi-cli-agents
+codex plugin add multi-cli-agents@local-multi-cli-agents
 ```
 
 ## Configuration
@@ -77,9 +77,9 @@ codex plugin add claude-code-agents@local-claude-code-agents
 Store long-lived user configuration outside the installed plugin cache:
 
 ```bash
-mkdir -p ~/.config/claude-code-agents
+mkdir -p ~/.config/multi-cli-agents
 cp plugins/claude-code-agents/.env.example ~/.config/claude-code-agents/.env
-chmod 600 ~/.config/claude-code-agents/.env
+chmod 600 ~/.config/multi-cli-agents/.env
 ```
 
 Minimal configuration:
@@ -151,9 +151,9 @@ Start the local dashboard from the repository root:
 npm run dashboard
 ```
 
-The page detects whether the Codex plugin is installed. When it is missing, use “Start installation” to register the local marketplace and install `claude-code-agents`; restart Codex and create a new task after installation. An installed MCP session can also call `open_dashboard` to launch the same page.
+The page detects whether the Codex plugin is installed. When it is missing, use “Start installation” to register the local marketplace and install `multi-cli-agents`; restart Codex and create a new task after installation. An installed MCP session can also call `open_dashboard` to launch the same page.
 
-The Configuration Center writes agent runtime settings to `~/.codex/claude-code-agents/claude-agents.sqlite`. Credentials are never returned in clear text. Node.js 22.5 or newer is required for the native `node:sqlite` runtime; WAL mode allows the MCP process, worker, and dashboard to share the database.
+The Configuration Center writes agent runtime settings under `~/.codex/multi-cli-agents`; an existing `~/.codex/claude-code-agents` directory remains supported for migration-free compatibility. Credentials are never returned in clear text. Node.js 22.5 or newer is required for the native `node:sqlite` runtime; WAL mode allows the MCP process, worker, and dashboard to share the database.
 
 Ask Codex to inspect the repository and prepare a concrete plan:
 
@@ -254,7 +254,7 @@ Sequential work defaults to `background=false`, so the MCP request waits and Cod
 
 Use `background=true` only when the job must return a Job ID first, run in parallel, or expose progress. Use `persistOnDisconnect=true` only when the user explicitly wants the job to survive the Codex session.
 
-Job data is stored under the Codex-provided `PLUGIN_DATA` directory. Direct execution falls back to `~/.codex/claude-code-agents`. History retention is explicit: `node plugins/claude-code-agents/server/cli.mjs cleanup --before ISO_DATE` removes only old terminal jobs and their events; it does not run automatically and never removes active jobs.
+Job data is stored under the Codex-provided `PLUGIN_DATA` directory. Direct execution falls back to `~/.codex/multi-cli-agents` and remains compatible with the old directory. History retention is explicit: `node plugins/claude-code-agents/server/cli.mjs cleanup --before ISO_DATE` removes only old terminal jobs and their events; it does not run automatically and never removes active jobs.
 
 ## Diagnostics
 

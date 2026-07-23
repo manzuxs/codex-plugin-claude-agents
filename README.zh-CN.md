@@ -1,10 +1,10 @@
-# Claude Code Agents for Codex
+# Multi-CLI Agents for Codex
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
 一个本地 Codex 插件，用于把已经批准的实施计划委派给不同角色的 Claude Code CLI 智能体。Codex 负责规划、范围控制和最终审查，Claude Code 在目标仓库中执行委派任务。
 
-![Codex 与 Claude Code Agents 协作流程](./diagram/claude-code-agents-workflow.svg)
+![Codex 与 Multi-CLI Agents 协作流程](./diagram/claude-code-agents-workflow.svg)
 
 ## 功能特性
 
@@ -46,14 +46,14 @@
 
 ```bash
 codex plugin marketplace add manzuxs/codex-plugin-claude-agents
-codex plugin add claude-code-agents@local-claude-code-agents
+codex plugin add multi-cli-agents@local-multi-cli-agents
 ```
 
 也可以使用完整 Git URL：
 
 ```bash
 codex plugin marketplace add https://github.com/manzuxs/codex-plugin-claude-agents.git
-codex plugin add claude-code-agents@local-claude-code-agents
+codex plugin add multi-cli-agents@local-multi-cli-agents
 ```
 
 ### 从本地仓库安装
@@ -62,7 +62,7 @@ codex plugin add claude-code-agents@local-claude-code-agents
 git clone https://github.com/manzuxs/codex-plugin-claude-agents.git
 cd codex-plugin-claude-agents
 codex plugin marketplace add "$(pwd)"
-codex plugin add claude-code-agents@local-claude-code-agents
+codex plugin add multi-cli-agents@local-multi-cli-agents
 ```
 
 安装后请新建 Codex 任务，使插件技能和 MCP 工具完成加载。如果 Codex 仍引用旧的插件缓存路径，请完全退出桌面应用，重新启动后再新建任务。
@@ -70,8 +70,8 @@ codex plugin add claude-code-agents@local-claude-code-agents
 ### 更新
 
 ```bash
-codex plugin marketplace upgrade local-claude-code-agents
-codex plugin add claude-code-agents@local-claude-code-agents
+codex plugin marketplace upgrade local-multi-cli-agents
+codex plugin add multi-cli-agents@local-multi-cli-agents
 ```
 
 ## 配置
@@ -79,9 +79,9 @@ codex plugin add claude-code-agents@local-claude-code-agents
 建议把长期用户配置保存在插件缓存目录之外：
 
 ```bash
-mkdir -p ~/.config/claude-code-agents
+mkdir -p ~/.config/multi-cli-agents
 cp plugins/claude-code-agents/.env.example ~/.config/claude-code-agents/.env
-chmod 600 ~/.config/claude-code-agents/.env
+chmod 600 ~/.config/multi-cli-agents/.env
 ```
 
 最小配置：
@@ -153,9 +153,9 @@ CLAUDE_DEFAULT_API_KEY_KIND=auth_token
 npm run dashboard
 ```
 
-页面会自动检测 Codex 插件是否已安装。未安装时，点击“开始安装”即可注册本地 marketplace 并安装 `claude-code-agents`；完成后重启 Codex，新建任务即可加载插件。安装后的 Codex 会话也可以直接调用 `open_dashboard` 工具唤起页面。
+页面会自动检测 Codex 插件是否已安装。未安装时，点击“开始安装”即可注册本地 marketplace 并安装 `multi-cli-agents`；完成后重启 Codex，新建任务即可加载插件。安装后的 Codex 会话也可以直接调用 `open_dashboard` 工具唤起页面。
 
-控制台中的“配置中心”把智能体运行配置写入 `~/.codex/claude-code-agents/claude-agents.sqlite`，凭据只显示“已配置”状态，绝不返回明文。当前版本要求 Node.js 22.5 或更高版本，以使用原生 `node:sqlite`；数据库启用 WAL，MCP 主进程、后台 worker 与浏览器控制台可以并发访问。
+控制台中的“配置中心”把智能体运行配置写入 `~/.codex/multi-cli-agents`；如果检测到旧的 `~/.codex/claude-code-agents`，会继续复用旧数据。凭据只显示“已配置”状态，绝不返回明文。当前版本要求 Node.js 22.5 或更高版本，以使用原生 `node:sqlite`；数据库启用 WAL，MCP 主进程、后台 worker 与浏览器控制台可以并发访问。
 
 先让 Codex 阅读仓库并生成具体计划：
 
@@ -255,7 +255,7 @@ browserMode, browserMcpProfile
 
 只有需要先返回 Job ID、并行运行或显式查看进度时，才使用 `background=true`。只有用户明确要求任务脱离 Codex 会话继续运行时，才使用 `persistOnDisconnect=true`。
 
-任务数据默认写入 Codex 提供的 `PLUGIN_DATA` 目录。直接执行时回退到 `~/.codex/claude-code-agents`。历史保留是显式操作：`node plugins/claude-code-agents/server/cli.mjs cleanup --before ISO_DATE` 只删除过期终态任务及其事件，不自动运行，也不会删除活动任务。
+任务数据默认写入 Codex 提供的 `PLUGIN_DATA` 目录。直接执行时回退到 `~/.codex/multi-cli-agents`，并兼容旧目录。历史保留是显式操作：`node plugins/claude-code-agents/server/cli.mjs cleanup --before ISO_DATE` 只删除过期终态任务及其事件，不自动运行，也不会删除活动任务。
 
 ## 诊断
 

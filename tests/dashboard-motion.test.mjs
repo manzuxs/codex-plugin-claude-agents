@@ -32,6 +32,7 @@ import { createDashboardScheduler, isDocumentHidden } from '../plugins/claude-co
 
 const dashboardDir = path.dirname(fileURLToPath(import.meta.url));
 const styles = fs.readFileSync(path.join(dashboardDir, '../plugins/claude-code-agents/dashboard/styles.css'), 'utf8');
+const dashboardApp = fs.readFileSync(path.join(dashboardDir, '../plugins/claude-code-agents/dashboard/app.js'), 'utf8');
 
 const normalizeSelector = (selector) => selector.replace(/\s+/g, ' ').trim();
 // Narrow CSS contract parsing: preserve commas inside selector functions, attributes, and strings.
@@ -351,6 +352,12 @@ test('reopening a modal cancels a stale exit and preserves the reopened modal', 
   assert.equal(classes.has('hidden'), false);
   assert.equal(modalClasses.has('motion-modal-exit'), false);
   assert.equal(modalClasses.has('motion-modal-enter'), true);
+});
+
+test('dashboard dialogs close only through explicit close buttons', () => {
+  assert.match(dashboardApp, /querySelectorAll\('\[data-close\]'\)/);
+  assert.doesNotMatch(dashboardApp, /event\.target === backdrop.*closeModal/);
+  assert.doesNotMatch(dashboardApp, /event\.key === 'Escape'.*closeModal/);
 });
 
 test('fake DOM trigger seams mount status, link, KPI, event, and alert effects', () => {

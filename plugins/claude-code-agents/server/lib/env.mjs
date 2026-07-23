@@ -41,9 +41,16 @@ function readEnvFile(filePath) {
 
 export function loadLayeredEnv({ pluginRoot, cwd = process.cwd(), processEnv = process.env } = {}) {
   const pluginEnv = pluginRoot ? readEnvFile(path.join(pluginRoot, '.env')) : {};
-  const userConfigFile = processEnv.CLAUDE_AGENTS_CONFIG_FILE || path.join(os.homedir(), '.config', 'claude-code-agents', '.env');
-  const userEnv = readEnvFile(userConfigFile);
-  const projectEnv = cwd ? readEnvFile(path.join(cwd, '.claude-agents.env')) : {};
+  const explicitUserConfig = processEnv.MULTI_CLI_AGENTS_CONFIG_FILE || processEnv.CLAUDE_AGENTS_CONFIG_FILE;
+  const userEnv = explicitUserConfig
+    ? readEnvFile(explicitUserConfig)
+    : {
+      ...readEnvFile(path.join(os.homedir(), '.config', 'claude-code-agents', '.env')),
+      ...readEnvFile(path.join(os.homedir(), '.config', 'multi-cli-agents', '.env')),
+    };
+  const projectEnv = cwd
+    ? { ...readEnvFile(path.join(cwd, '.claude-agents.env')), ...readEnvFile(path.join(cwd, '.multi-cli-agents.env')) }
+    : {};
   // Existing process variables intentionally win over files so CI, secret managers,
   // and one-off invocations can override local configuration safely.
   return { ...pluginEnv, ...userEnv, ...projectEnv, ...processEnv };

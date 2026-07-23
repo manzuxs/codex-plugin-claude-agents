@@ -32,7 +32,7 @@ function waitFor(predicate, timeoutMs = 1500) {
 
 test('plugin MCP manifest launches from its installed root', async () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.mcp.json'), 'utf8'));
-  const config = manifest.mcpServers.claude_code_agents;
+  const config = manifest.mcpServers.multi_cli_agents;
   assert.equal(config.cwd, '.');
   assert.deepEqual(config.args, ['./server/index.mjs']);
   assert.equal(config.tool_timeout_sec, 2100);
@@ -230,7 +230,7 @@ test('MCP server initializes, lists tools, and performs a dry-run delegation', a
   await waitFor(() => messages.find((m) => m.id === 3));
   child.kill('SIGTERM');
   assert.equal(stderr, '');
-  assert.equal(messages.find((m) => m.id === 1)?.result?.serverInfo?.name, 'claude-code-agents');
+  assert.equal(messages.find((m) => m.id === 1)?.result?.serverInfo?.name, 'multi-cli-agents');
   assert.equal(messages.find((m) => m.id === 1)?.result?.serverInfo?.version, PLUGIN_VERSION);
   const tools = messages.find((m) => m.id === 2)?.result?.tools || [];
   const runAgent = tools.find((tool) => tool.name === 'run_agent');

@@ -9,9 +9,123 @@ const state = {
   reconnect: createReconnectState(),
   motionSnapshot: createMotionSnapshot(), chartFingerprint: '', resourceData: null, resourceFingerprint: '', resourceDimensions: {}, resourceRows: new Map(), resizeFrame: null,
 };
+const FALLBACK_RUNNERS = [
+  { id: 'claude', name: 'Claude Code' },
+  { id: 'codex', name: 'Codex CLI' },
+  { id: 'grok', name: 'Grok CLI' },
+  { id: 'agy', name: 'Antigravity CLI' },
+];
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+const customSelects = new Map();
+let customSelectSequence = 0;
+const closeCustomSelects = (except = null) => {
+  customSelects.forEach((control) => {
+    if (control !== except) control.setOpen(false);
+  });
+};
+function syncCustomSelect(native) {
+  const control = customSelects.get(native);
+  if (!control) return;
+  const options = [...native.options];
+  control.menu.innerHTML = '';
+  options.forEach((option, index) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'select-option';
+    item.role = 'option';
+    item.dataset.value = option.value;
+    item.disabled = option.disabled;
+    item.setAttribute('aria-selected', String(index === native.selectedIndex));
+    item.innerHTML = `<span class="select-option-mark" aria-hidden="true">✓</span><span>${esc(option.textContent)}</span>`;
+    item.addEventListener('click', (event) => {
+      event.stopPropagation();
+      native.selectedIndex = index;
+      native.dispatchEvent(new Event('change', { bubbles: true }));
+      control.setOpen(false);
+    });
+    control.menu.append(item);
+  });
+  const selected = native.options[native.selectedIndex];
+  control.label.textContent = selected?.textContent || '请选择';
+  control.trigger.setAttribute('aria-expanded', String(control.open));
+}
+function syncCustomSelects() {
+  customSelects.forEach((control) => syncCustomSelect(control.native));
+}
+function createCustomSelect(native) {
+  if (customSelects.has(native)) return customSelects.get(native);
+  const wrapper = document.createElement('div');
+  wrapper.className = 'select-control';
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'select-trigger';
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.setAttribute('aria-label', native.getAttribute('aria-label') || native.id || '选择');
+  const label = document.createElement('span');
+  const menu = document.createElement('div');
+  menu.className = 'select-menu';
+  menu.role = 'listbox';
+  menu.id = `${native.id || 'select'}-menu-${customSelectSequence += 1}`;
+  trigger.setAttribute('aria-controls', menu.id);
+  trigger.append(label);
+  wrapper.append(trigger, menu);
+  native.classList.add('native-select');
+  native.parentNode.insertBefore(wrapper, native);
+  wrapper.append(native);
+  const control = {
+    native,
+    wrapper,
+    trigger,
+    label,
+    menu,
+    open: false,
+    setOpen(open) {
+      control.open = Boolean(open);
+      wrapper.classList.toggle('is-open', control.open);
+      trigger.setAttribute('aria-expanded', String(control.open));
+      if (control.open) {
+        closeCustomSelects(control);
+        menu.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+      }
+    },
+  };
+  customSelects.set(native, control);
+  trigger.addEventListener('click', (event) => {
+    event.stopPropagation();
+    control.setOpen(!control.open);
+  });
+  trigger.addEventListener('keydown', (event) => {
+    const options = [...native.options].filter((option) => !option.disabled);
+    if (!options.length) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      control.setOpen(!control.open);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      control.setOpen(false);
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+    event.preventDefault();
+    const current = Math.max(0, options.findIndex((option) => option.index === native.selectedIndex));
+    const next = event.key === 'ArrowDown' ? Math.min(options.length - 1, current + 1) : Math.max(0, current - 1);
+    native.selectedIndex = options[next].index;
+    native.dispatchEvent(new Event('change', { bubbles: true }));
+    control.setOpen(true);
+  });
+  native.addEventListener('change', () => syncCustomSelect(native));
+  syncCustomSelect(native);
+  return control;
+}
+function enhanceSelects() {
+  document.querySelectorAll('select').forEach((native) => createCustomSelect(native));
+}
+document.addEventListener('click', () => closeCustomSelects());
 const api = async (path, options = {}) => {
   const response = await fetch(path, { ...options, headers: { 'content-type': 'application/json', 'x-claude-agents-token': token, ...(options.headers || {}) } });
   const value = await response.json();
@@ -87,7 +201,7 @@ const deriveAlerts = () => {
   state.jobs.filter((job) => ['failed', 'blocked'].includes(job.status)).slice(0, 3).forEach((job) => alerts.push({ id: `job:${job.jobId}`, critical: true, text: `${state.agents.find((agent) => agent.id === job.agent)?.name || job.agent} · ${job.task || '任务失败'}`, time: timeText(job.finishedAt || job.createdAt) }));
   const queued = state.jobs.filter((job) => job.status === 'queued').length;
   if (queued) alerts.push({ id: 'queued', text: `${queued} 项任务等待执行资源`, time: '实时' });
-  if (state.install && !state.install.installed) alerts.push({ id: 'install', text: 'Claude Agents 插件尚未安装', time: '设置' });
+  if (state.install && !state.install.installed) alerts.push({ id: 'install', text: 'Multi-CLI Agents 插件尚未安装', time: '设置' });
   return alerts;
 };
 
@@ -395,7 +509,7 @@ function renderAlerts(diff, source) {
   state.jobs.filter((job) => ['failed', 'blocked'].includes(job.status)).slice(0, 3).forEach((job) => alerts.push({ id: `job:${job.jobId}`, critical: true, text: `${state.agents.find((agent) => agent.id === job.agent)?.name || job.agent} · ${job.task || '任务失败'}`, time: timeText(job.finishedAt || job.createdAt) }));
   const queued = state.jobs.filter((job) => job.status === 'queued').length;
   if (queued) alerts.push({ id: 'queued', text: `${queued} 项任务等待执行资源`, time: '实时' });
-  if (state.install && !state.install.installed) alerts.push({ id: 'install', text: 'Claude Agents 插件尚未安装', time: '设置' });
+  if (state.install && !state.install.installed) alerts.push({ id: 'install', text: 'Multi-CLI Agents 插件尚未安装', time: '设置' });
   state.alerts = alerts;
   $('#alert-count').textContent = `${alerts.length} 条`;
   patchKeyedList($('#alert-list'), alerts, (alert) => alert.id, (alert) => `<div class="alert-row ${alert.critical ? 'critical' : ''}"><span class="alert-level">${alert.critical ? '!' : 'i'}</span><span>${esc(alert.text)}</span><time>${esc(alert.time)}</time></div>`, '<div class="empty-row">系统运行正常</div>');
@@ -446,13 +560,16 @@ function renderConfigOptions() {
   const select = $('#config-agent'); const previous = select.value;
   select.innerHTML = state.agents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join('');
   select.value = previous || state.selectedAgent || state.agents[0]?.id || '';
-  const runnerSelect = $('#config-runner'); const runnerPrevious = runnerSelect.value || 'default';
-  runnerSelect.innerHTML = `<option value="default">默认 Runner</option>${state.runners.map((runner) => `<option value="${esc(runner.id)}">${esc(runner.name)}${runner.available === false ? '（未安装）' : ''}</option>`).join('')}`;
+  syncCustomSelect(select);
+  const runnerSelect = $('#config-runner'); const runnerPrevious = runnerSelect.value || 'default'; const runners = state.runners.length ? state.runners : FALLBACK_RUNNERS;
+  runnerSelect.innerHTML = `<option value="default">默认 Runner</option>${runners.map((runner) => `<option value="${esc(runner.id)}">${esc(runner.name)}${runner.available === false ? '（未安装）' : ''}</option>`).join('')}`;
   runnerSelect.value = [...runnerSelect.options].some((option) => option.value === runnerPrevious) ? runnerPrevious : 'default';
+  syncCustomSelect(runnerSelect);
 }
 function fillConfig() {
   const agent = state.agents.find((item) => item.id === $('#config-agent').value) || state.agents[0]; const runner = $('#config-runner').value || 'default'; const config = runner === 'default' ? (agent?.configured || {}) : (agent?.configuredByRunner?.[runner] || {});
   $('#cfg-model').value = config.model || ''; $('#cfg-effort').value = config.effort || 'high'; $('#cfg-permission').value = config.permissionMode || 'auto'; $('#cfg-output').value = config.outputFormat || 'json'; $('#cfg-timeout').value = config.timeoutMs || 1800000; $('#cfg-budget').value = config.maxBudgetUsd ?? 0; $('#cfg-gateway').value = config.gatewayUrl || ''; $('#cfg-key-kind').value = config.apiKeyKind || 'auth_token'; $('#cfg-api-key').value = ''; $('#cfg-browser-profiles').value = config.browserMcpConfigsJson || '{}';
+  syncCustomSelects();
 }
 function renderInstall() {
   const codex = Boolean(state.install?.codexAvailable); const market = Boolean(state.install?.marketplaceAvailable); const installed = Boolean(state.install?.installed);
@@ -583,10 +700,8 @@ document.querySelectorAll('.tab').forEach((button) => button.addEventListener('c
 $('#agent-nodes').addEventListener('click', (event) => { const node = event.target.closest('[data-agent]'); if (node) selectAgent(node.dataset.agent, true).catch((error) => showToast(error.message, 'error')); });
 $('#recent-list').addEventListener('click', (event) => { const row = event.target.closest('[data-job]'); if (!row) return; selectJob(row.dataset.job, true).catch((error) => showToast(error.message, 'error')); });
 document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => closeModal(button.dataset.close)));
-document.querySelectorAll('.modal-backdrop').forEach((backdrop) => backdrop.addEventListener('click', (event) => { if (event.target === backdrop) closeModal(backdrop.id); }));
 document.addEventListener('keydown', (event) => {
   trapModalFocus(event);
-  if (event.key === 'Escape') { const modal = document.querySelector('.modal-backdrop:not(.hidden)'); if (modal) closeModal(modal.id); }
 });
 document.addEventListener('visibilitychange', () => {
   document.documentElement.classList.toggle('document-hidden', document.hidden);
@@ -596,4 +711,5 @@ window.addEventListener('resize', scheduleResize);
 setInterval(() => { $('#clock').textContent = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-'); }, 1000);
 setInterval(() => refreshBootstrap('poll').catch(() => { state.streamState = 'error'; scheduleRender('poll', { force: true }); }), 5000);
 $('#clock').textContent = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-');
+enhanceSelects();
 refreshBootstrap('bootstrap').catch((error) => showToast(error.message, 'error'));

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="dashboard-token" content="__DASHBOARD_TOKEN__">
-  <title>Claude Agents 智慧指挥大屏</title>
+  <title>Multi-CLI Agents 智慧指挥大屏</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
     <header class="topbar">
       <div class="brand-mark" aria-hidden="true"></div>
       <div class="brand-copy">
-        <strong>Claude Agents <span>智慧指挥大屏</span></strong>
+        <strong>Multi-CLI Agents <span>智慧指挥大屏</span></strong>
         <small>本地多智能体研发协同与自动化执行平台</small>
       </div>
       <div class="topbar-line" aria-hidden="true"></div>
@@ -101,7 +101,7 @@
     <footer class="statusbar">
       <div><span class="status-icon">LOCAL</span><small>本地服务</small><b id="system-state">正常</b></div>
       <div><span class="status-icon">DB</span><small>SQLite WAL</small><b>正常</b></div>
-      <div><span class="status-icon">CLI</span><small>Claude CLI</small><b id="cli-state">已连接</b></div>
+      <div><span class="status-icon">CLI</span><small>Runner CLI</small><b id="cli-state">已连接</b></div>
       <div><span class="status-icon">SSE</span><small>事件流</small><b id="stream-footer">待机</b></div>
       <div><span class="status-icon">WEB</span><small>浏览器取证</small><b>可用</b></div>
       <div><span class="status-icon">SYNC</span><small>数据更新时间</small><b id="data-freshness">等待连接</b></div>
@@ -110,10 +110,10 @@
 
   <div class="modal-backdrop hidden" id="settings-modal">
     <section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <header class="modal-title-row"><div><span class="modal-kicker">SYSTEM SETTINGS</span><h2 id="settings-title">设置中心</h2><p>管理智能体运行参数与 Codex 插件安装状态。</p></div><button class="close-button" data-close="settings-modal" aria-label="关闭设置">×</button></header>
+      <header class="modal-title-row"><div><span class="modal-kicker">MULTI-CLI SETTINGS</span><h2 id="settings-title">设置中心</h2><p>管理角色、Runner 运行参数与插件安装状态。</p></div><button class="close-button" data-close="settings-modal" aria-label="关闭设置">×</button></header>
       <div class="settings-tabs" role="tablist"><button class="settings-tab active" data-settings-tab="agent" type="button">智能体参数</button><button class="settings-tab" data-settings-tab="install" type="button">插件安装</button></div>
       <div class="settings-pane active" data-settings-pane="agent">
-        <div class="form-grid config-target-grid"><label class="field-label">选择智能体<select id="config-agent"></select></label><label class="field-label">配置 Runner<select id="config-runner"><option value="default">默认 Runner</option></select></label></div>
+        <div class="form-grid config-target-grid"><label class="field-label">选择角色<select id="config-agent"></select></label><label class="field-label">配置 Runner<select id="config-runner"><option value="default">默认 Runner</option><option value="claude">Claude Code</option><option value="codex">Codex CLI</option><option value="grok">Grok CLI</option><option value="agy">Antigravity CLI</option></select></label></div>
         <div class="form-grid">
           <label class="field-label">模型<input id="cfg-model" placeholder="sonnet"></label>
           <label class="field-label">思考强度<select id="cfg-effort"><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option><option value="max">最大</option></select></label>

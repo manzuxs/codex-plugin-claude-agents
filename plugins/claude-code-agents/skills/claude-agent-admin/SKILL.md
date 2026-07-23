@@ -7,7 +7,7 @@ description: 配置、检查、排障或扩展多 CLI Agent 插件；处理 Runn
 
 ## 安全配置原则
 
-1. 控制台配置写入 `PLUGIN_DATA/claude-agents.sqlite`（默认 `~/.codex/claude-code-agents/claude-agents.sqlite`），数据库文件权限为 `0600`；环境变量文件仅作为兼容读取层。
+1. 控制台配置写入 `PLUGIN_DATA`（默认 `~/.codex/multi-cli-agents`；检测到旧的 `~/.codex/claude-code-agents` 时继续兼容），数据库文件权限为 `0600`；环境变量文件仅作为兼容读取层。
 2. 不把 `.env` 或 SQLite 数据库提交到 Git；仓库只保留 `.env.example`。
 3. MCP 返回的配置视图只显示 `gatewayConfigured`、`credentialConfigured` 和 `browserMcpConfigured` 等布尔状态，不返回值、密钥或配置路径。
 4. 子进程使用参数数组且 `shell: false`，避免把用户任务拼成 shell 命令。
@@ -17,7 +17,7 @@ description: 配置、检查、排障或扩展多 CLI Agent 插件；处理 Runn
 从低到高：
 
 1. 插件根目录 `.env`
-2. 当前项目 `.claude-agents.env`
+2. 当前项目 `.multi-cli-agents.env`（兼容 `.claude-agents.env`）
 3. SQLite 控制台配置
 4. 启动 Codex 的进程环境变量
 5. 单次 `run_agent` 的非秘密覆盖字段
@@ -39,7 +39,7 @@ description: 配置、检查、排障或扩展多 CLI Agent 插件；处理 Runn
 - `<PREFIX>_EXTRA_ENV_JSON`
 - `<PREFIX>_BROWSER_MCP_CONFIGS_JSON`：浏览器 MCP profile 名称到绝对配置文件路径的 JSON 映射，仅由受信任配置提供
 
-未设置时回退到 `CLAUDE_DEFAULT_*`。
+未设置时按 Runner 回退到对应 `*_DEFAULT_*`；Claude 仍兼容 `CLAUDE_DEFAULT_*`。
 
 浏览器能力默认不加载，只有 `ui-designer`、`frontend-engineer` 和 `qa-engineer` 可启用。UI 设计师用于真实渲染与截图验收，前端工程师用于实现自测，QA 用于独立冒烟与 E2E。`run_agent(browserMode=repository)` 使用仓库已有 Playwright/Cypress；`chrome` 显式添加 Claude in Chrome，且 API 网关环境会在启动前阻止该组合；`mcp` 通过 `browserMcpProfile` 选择预配置 profile，只有一个 profile 时可省略名称。
 

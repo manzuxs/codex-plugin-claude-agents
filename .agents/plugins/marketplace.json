@@ -1,11 +1,11 @@
 {
-  "name": "local-claude-code-agents",
+  "name": "local-multi-cli-agents",
   "interface": {
-    "displayName": "Claude Code Agents"
+    "displayName": "Multi-CLI Agents"
   },
   "plugins": [
     {
-      "name": "claude-code-agents",
+      "name": "multi-cli-agents",
       "source": {
         "source": "local",
         "path": "./plugins/claude-code-agents"

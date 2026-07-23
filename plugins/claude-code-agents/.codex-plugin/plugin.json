@@ -1,7 +1,7 @@
 {
-  "name": "claude-code-agents",
+  "name": "multi-cli-agents",
   "version": "0.2.0+codex.20260715074010",
-  "description": "Codex delegates an existing approved plan to role-specialized Claude Code CLI agents using native --agents/--agent support.",
+  "description": "Codex delegates an existing approved plan to role-specialized local CLI agents across Claude, Codex, Grok, and Antigravity.",
   "author": {
     "name": "Local Developer"
   },
@@ -16,9 +16,9 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Claude Code Agents",
-    "shortDescription": "Delegate Codex plans to Claude Code specialists",
-    "longDescription": "Codex keeps planning and review responsibility, then passes the existing approved plan to a local Claude Code CLI specialist loaded through native custom-agent flags.",
+    "displayName": "Multi-CLI Agents",
+    "shortDescription": "Delegate Codex plans to specialized local CLI agents",
+    "longDescription": "Codex keeps planning and review responsibility, then passes an approved plan to a role-specialized local CLI Runner with capability-aware model and permission settings.",
     "developerName": "Local Developer",
     "category": "Developer Tools",
     "capabilities": [

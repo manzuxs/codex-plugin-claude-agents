@@ -1,4 +1,4 @@
-# 从 Codex 计划到 Claude Code 落地
+# 从 Codex 计划到 Multi-CLI Agents 落地
 
 ## 1. 先让 Codex 输出计划
 

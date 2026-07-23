@@ -1,9 +1,9 @@
 {
-  "name": "codex-plugin-claude-agents-marketplace",
+  "name": "codex-plugin-multi-cli-agents-marketplace",
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Codex plugin marketplace that delegates approved plans to role-specialized Claude Code CLI agents.",
+  "description": "Codex plugin marketplace that delegates approved plans to role-specialized local CLI agents.",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "check": "node scripts/check.mjs",

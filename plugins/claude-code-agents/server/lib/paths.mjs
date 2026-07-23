@@ -16,13 +16,15 @@ export function inferPluginRoot(importMetaUrl) {
 }
 
 export function resolvePluginRoot(importMetaUrl) {
-  const candidate = process.env.CLAUDE_AGENTS_PLUGIN_ROOT || process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT;
+  const candidate = process.env.MULTI_CLI_AGENTS_PLUGIN_ROOT || process.env.CLAUDE_AGENTS_PLUGIN_ROOT || process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT;
   return path.resolve(candidate || inferPluginRoot(importMetaUrl));
 }
 
 export function resolveDataRoot(pluginRoot) {
-  const candidate = process.env.CLAUDE_AGENTS_DATA_ROOT || process.env.PLUGIN_DATA || process.env.CLAUDE_PLUGIN_DATA;
-  const dataRoot = path.resolve(candidate || path.join(os.homedir(), '.codex', 'claude-code-agents'));
+  const candidate = process.env.MULTI_CLI_AGENTS_DATA_ROOT || process.env.CLAUDE_AGENTS_DATA_ROOT || process.env.PLUGIN_DATA || process.env.CLAUDE_PLUGIN_DATA;
+  const canonical = path.join(os.homedir(), '.codex', 'multi-cli-agents');
+  const legacy = path.join(os.homedir(), '.codex', 'claude-code-agents');
+  const dataRoot = path.resolve(candidate || (fs.existsSync(legacy) && !fs.existsSync(canonical) ? legacy : canonical));
   fs.mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   return dataRoot;
 }
