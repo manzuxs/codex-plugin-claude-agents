@@ -1,5 +1,5 @@
 ---
-name: claude-agent-admin
+name: multi-cli-agent-admin
 description: 配置、检查、排障或扩展多 CLI Agent 插件；处理 Runner、.env、模型、思考强度、API 网关、密钥注入、智能体提示词、MCP 状态和 dry-run。
 ---
 

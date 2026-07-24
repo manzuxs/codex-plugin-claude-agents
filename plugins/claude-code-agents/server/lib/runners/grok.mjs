@@ -24,7 +24,7 @@ function mapOutputFormat(format) {
   return 'plain';
 }
 
-export function buildGrokInvocation({ pluginRoot, agent, runtime, request }) {
+export function buildGrokInvocation({ pluginRoot, agent, runtime, request, cwd }) {
   validateRuntime(runtime, request);
   const promptFile = path.join(pluginRoot, 'agents', agent.prompt);
   if (!fs.existsSync(promptFile)) throw new Error(`Agent prompt not found: ${promptFile}`);
@@ -38,7 +38,7 @@ export function buildGrokInvocation({ pluginRoot, agent, runtime, request }) {
     browserMode: 'none',
     codexReviewRequired: request.codexReviewRequired !== false,
   })}\n\n<role_protocol>\n${specialistPrompt}\n</role_protocol>`;
-  const args = ['--no-alt-screen', '--cwd', request.cwd || process.cwd(), '--output-format', mapOutputFormat(runtime.outputFormat)];
+  const args = ['--no-alt-screen', '--cwd', cwd || request.cwd || process.cwd(), '--output-format', mapOutputFormat(runtime.outputFormat)];
   if (runtime.model) args.push('--model', runtime.model);
   if (runtime.effort && runtime.effort !== 'default') args.push('--reasoning-effort', runtime.effort);
   if (runtime.permissionMode) args.push('--permission-mode', runtime.permissionMode);
@@ -77,15 +77,16 @@ export function parseGrokOutput(stdout, outputFormat) {
   if (outputFormat === 'text') return { text: stdout.trim(), structured: stdout.trim() ? undefined : [] };
   const parsed = parseJsonLines(stdout);
   const messages = parsed.events.map(eventText).filter(Boolean);
-  const terminal = [...parsed.events].reverse().find((event) => /completed|result|final/i.test(String(event?.type || event?.status || '')));
-  const responseText = eventText(terminal) || terminal?.result || terminal?.output || parsed.text;
+  const terminal = [...parsed.events].reverse().find((event) => /completed|result|final|error|failed/i.test(String(event?.type || event?.status || '')));
+  const responseText = eventText(terminal) || terminal?.result || terminal?.output || terminal?.error?.message || terminal?.error || parsed.text;
   const usage = terminal?.usage || [...parsed.events].reverse().find((event) => event?.usage)?.usage;
   return {
-    text: messages.at(-1) || responseText || parsed.text,
+    text: messages.at(-1) || responseText || parsed.text || 'Grok CLI 未返回可读结果。',
     sessionId: terminal?.session_id || terminal?.sessionId || terminal?.conversation_id || null,
     inputTokens: usage?.input_tokens ?? usage?.input ?? null,
     outputTokens: usage?.output_tokens ?? usage?.output ?? null,
     structured: parsed.events,
+    error: terminal?.error?.message || terminal?.error || undefined,
   };
 }
 
@@ -106,7 +107,7 @@ export const grokRunner = Object.freeze({
   buildInvocation: buildGrokInvocation,
   parseOutput: parseGrokOutput,
   async run({ pluginRoot, agent, runtime, request, cwd, signal, onProgress, onSpawn }) {
-    const invocation = buildGrokInvocation({ pluginRoot, agent, runtime, request });
+    const invocation = buildGrokInvocation({ pluginRoot, agent, runtime, request, cwd });
     const startedAt = new Date().toISOString();
     if (request.dryRun) {
       return {

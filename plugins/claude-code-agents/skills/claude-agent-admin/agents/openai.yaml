@@ -8,5 +8,5 @@ policy:
 dependencies:
   tools:
     - type: "mcp"
-      value: "claude_code_agents"
-      description: "本地 Claude Code CLI 多智能体 MCP server"
+      value: "multi_cli_agents"
+      description: "本地 Multi-CLI Agents MCP server"

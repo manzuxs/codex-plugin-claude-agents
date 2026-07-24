@@ -20,6 +20,13 @@ const $ = (selector) => document.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const customSelects = new Map();
 let customSelectSequence = 0;
+const configSelectionStorageKey = 'multi-cli-agents:config-selection';
+const readConfigSelection = () => {
+  try { return JSON.parse(localStorage.getItem(configSelectionStorageKey) || '{}'); } catch { return {}; }
+};
+const rememberConfigSelection = () => {
+  try { localStorage.setItem(configSelectionStorageKey, JSON.stringify({ agent: $('#config-agent')?.value || '', runner: $('#config-runner')?.value || 'default' })); } catch {}
+};
 const closeCustomSelects = (except = null) => {
   customSelects.forEach((control) => {
     if (control !== except) control.setOpen(false);
@@ -296,7 +303,17 @@ function eventView(event) {
   if (event?.type === 'system') return ['系统事件', 'SYS', event.subtype || event.result || '任务初始化'];
   const content = event?.message?.content;
   const text = Array.isArray(content) ? content.map((item) => item?.text || '').filter(Boolean).join(' ') : content;
-  return ['会话消息', 'MSG', text || event?.subtype || event?.result || ''];
+  const type = String(event?.type || event?.status || event?.subtype || '').trim();
+  const error = event?.error?.message || event?.error || event?.detail;
+  if (error) return ['运行错误', 'ERR', String(error)];
+  if (text) return ['模型消息', 'MSG', text];
+  if (type) return ['运行事件', 'EVT', type];
+  return ['运行事件', 'EVT', '未命名事件'];
+}
+
+function hasEventDetail(event) {
+  const [, , detail] = eventView(event);
+  return Boolean(detail && detail !== '未命名事件');
 }
 
 function setupCanvas(canvas) {
@@ -557,11 +574,12 @@ function renderAll() {
 }
 
 function renderConfigOptions() {
+  const savedSelection = readConfigSelection();
   const select = $('#config-agent'); const previous = select.value;
   select.innerHTML = state.agents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join('');
-  select.value = previous || state.selectedAgent || state.agents[0]?.id || '';
+  select.value = savedSelection.agent || previous || state.selectedAgent || state.agents[0]?.id || '';
   syncCustomSelect(select);
-  const runnerSelect = $('#config-runner'); const runnerPrevious = runnerSelect.value || 'default'; const runners = state.runners.length ? state.runners : FALLBACK_RUNNERS;
+  const runnerSelect = $('#config-runner'); const runnerPrevious = savedSelection.runner || runnerSelect.value || 'default'; const runners = state.runners.length ? state.runners : FALLBACK_RUNNERS;
   runnerSelect.innerHTML = `<option value="default">默认 Runner</option>${runners.map((runner) => `<option value="${esc(runner.id)}">${esc(runner.name)}${runner.available === false ? '（未安装）' : ''}</option>`).join('')}`;
   runnerSelect.value = [...runnerSelect.options].some((option) => option.value === runnerPrevious) ? runnerPrevious : 'default';
   syncCustomSelect(runnerSelect);
@@ -615,7 +633,7 @@ function openSettings(tab = 'agent') {
   renderConfigOptions(); fillConfig(); renderInstall(); openModal('settings-modal');
 }
 function filteredEvents() {
-  if (state.tab === 'events') return state.events;
+  if (state.tab === 'events') return state.events.filter(hasEventDetail);
   return state.events.filter((event) => { const kind = eventClass(event); return state.tab === 'tools' ? Boolean(kind.tool) : state.tab === 'files' ? kind.file : kind.check; });
 }
 function renderSession(diff, source) {
@@ -684,12 +702,12 @@ async function install() {
 async function saveConfig() {
   const values = { model: $('#cfg-model').value.trim(), effort: $('#cfg-effort').value, permissionMode: $('#cfg-permission').value, outputFormat: $('#cfg-output').value, timeoutMs: $('#cfg-timeout').value, maxBudgetUsd: $('#cfg-budget').value, gatewayUrl: $('#cfg-gateway').value.trim(), apiKeyKind: $('#cfg-key-kind').value, browserMcpConfigsJson: $('#cfg-browser-profiles').value.trim() || '{}' };
   if ($('#cfg-api-key').value) values.apiKey = $('#cfg-api-key').value;
-  try { await post('/api/config', { agent: $('#config-agent').value, runner: $('#config-runner').value || 'default', values }); showToast('配置已保存到 SQLite，并将用于后续任务。', 'success'); await refreshBootstrap('interaction'); } catch (error) { showToast(error.message, 'error'); }
+  try { rememberConfigSelection(); await post('/api/config', { agent: $('#config-agent').value, runner: $('#config-runner').value || 'default', values }); showToast('配置已保存到 SQLite，并将用于后续任务。', 'success'); await refreshBootstrap('interaction'); } catch (error) { showToast(error.message, 'error'); }
 }
 
 $('#settings-open').addEventListener('click', () => openSettings('agent'));
-$('#config-agent').addEventListener('change', fillConfig);
-$('#config-runner').addEventListener('change', fillConfig);
+$('#config-agent').addEventListener('change', () => { rememberConfigSelection(); fillConfig(); });
+$('#config-runner').addEventListener('change', () => { rememberConfigSelection(); fillConfig(); });
 $('#config-save').addEventListener('click', saveConfig);
 $('#install-run').addEventListener('click', install);
 $('#recent-refresh').addEventListener('click', () => refreshBootstrap('interaction').catch((error) => showToast(error.message, 'error')));

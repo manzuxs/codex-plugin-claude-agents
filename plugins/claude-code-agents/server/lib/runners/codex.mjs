@@ -18,7 +18,7 @@ function validateRuntime(runtime, request) {
   if (!['json', 'stream-json'].includes(runtime.outputFormat)) unsupported('outputFormat', runtime.outputFormat, ['json', 'stream-json']);
 }
 
-export function buildCodexInvocation({ pluginRoot, agent, runtime, request }) {
+export function buildCodexInvocation({ pluginRoot, agent, runtime, request, cwd }) {
   validateRuntime(runtime, request);
   const promptFile = path.join(pluginRoot, 'agents', agent.prompt);
   if (!fs.existsSync(promptFile)) throw new Error(`Agent prompt not found: ${promptFile}`);
@@ -32,7 +32,7 @@ export function buildCodexInvocation({ pluginRoot, agent, runtime, request }) {
     browserMode: 'none',
     codexReviewRequired: request.codexReviewRequired !== false,
   })}\n\n<role_protocol>\n${specialistPrompt}\n</role_protocol>`;
-  const args = ['exec', '--json', '--cd', request.cwd || process.cwd()];
+  const args = ['exec', '--json', '--cd', cwd || request.cwd || process.cwd()];
   if (runtime.model) args.push('--model', runtime.model);
   if (runtime.permissionMode === 'bypassPermissions') args.push('--dangerously-bypass-approvals-and-sandbox');
   else if (runtime.permissionMode === 'plan') args.push('--sandbox', 'read-only');
@@ -103,7 +103,7 @@ export const codexRunner = Object.freeze({
   buildInvocation: buildCodexInvocation,
   parseOutput: parseCodexOutput,
   async run({ pluginRoot, agent, runtime, request, cwd, signal, onProgress, onSpawn }) {
-    const invocation = buildCodexInvocation({ pluginRoot, agent, runtime, request });
+    const invocation = buildCodexInvocation({ pluginRoot, agent, runtime, request, cwd });
     const startedAt = new Date().toISOString();
     if (request.dryRun) {
       return {

@@ -1,12 +1,12 @@
 interface:
-  display_name: "Claude Code 多智能体编排"
-  short_description: "Codex 先规划，再委派 Claude Code 专家执行"
+  display_name: "Multi-CLI Agent 编排"
+  short_description: "Codex 先规划，再委派合适的本地 CLI Runner"
   brand_color: "#10A37F"
-  default_prompt: "先制定实施计划，然后启用合适的 Claude Code 智能体执行，并由 Codex 审查结果。"
+  default_prompt: "先制定实施计划，然后选择合适的本地 CLI Runner 与专业智能体执行，并由 Codex 审查结果。"
 policy:
   allow_implicit_invocation: true
 dependencies:
   tools:
     - type: "mcp"
-      value: "claude_code_agents"
-      description: "本地 Claude Code CLI 多智能体 MCP server"
+      value: "multi_cli_agents"
+      description: "本地 Multi-CLI Agents MCP server"

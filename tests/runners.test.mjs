@@ -35,8 +35,9 @@ function request(overrides = {}) {
 }
 
 test('Codex invocation uses only supported safe argv for each permission intent', () => {
-  const plan = buildCodexInvocation({ pluginRoot, agent, runtime: codexRuntime({ permissionMode: 'plan' }), request: request() });
-  assert.deepEqual(plan.args.slice(0, 8), ['exec', '--json', '--cd', '/tmp', '--model', 'gpt-test', '--sandbox', 'read-only']);
+  const targetCwd = path.join(pluginRoot, 'server');
+  const plan = buildCodexInvocation({ pluginRoot, agent, runtime: codexRuntime({ permissionMode: 'plan' }), request: request(), cwd: targetCwd });
+  assert.deepEqual(plan.args.slice(0, 8), ['exec', '--json', '--cd', targetCwd, '--model', 'gpt-test', '--sandbox', 'read-only']);
   assert.equal(plan.args.includes('--ask-for-approval'), false);
   assert.equal(plan.args.includes('--agents'), false);
 
@@ -184,9 +185,11 @@ test('MCP exposes list_runners, runner preview, and declared capabilities', asyn
 });
 
 test('Grok and Antigravity invocations preserve role prompts and map native options', () => {
+  const targetCwd = path.join(pluginRoot, 'server');
   const grok = buildGrokInvocation({
     pluginRoot,
     agent,
+    cwd: targetCwd,
     runtime: {
       runner: 'grok', model: 'grok-test', effort: 'high', permissionMode: 'bypassPermissions', outputFormat: 'stream-json',
       timeoutMs: 30_000, extraEnv: {}, grokBin: 'grok', gatewayUrl: '', apiKey: '',
@@ -195,6 +198,7 @@ test('Grok and Antigravity invocations preserve role prompts and map native opti
   });
   assert.equal(grok.command, 'grok');
   assert.ok(grok.args.includes('--single'));
+  assert.equal(grok.args[grok.args.indexOf('--cwd') + 1], targetCwd);
   assert.equal(grok.args[grok.args.indexOf('--output-format') + 1], 'streaming-json');
   assert.ok(grok.args.includes('--always-approve'));
   assert.ok(grok.prompt.includes('<role_protocol>'));
@@ -224,6 +228,12 @@ test('Grok parser keeps the final assistant message and usage metadata', () => {
   assert.equal(parsed.sessionId, 'grok-session');
   assert.equal(parsed.inputTokens, 3);
   assert.equal(parsed.outputTokens, 4);
+});
+
+test('Grok parser preserves a structured error when no assistant text is returned', () => {
+  const parsed = parseGrokOutput(JSON.stringify({ type: 'error', error: { message: 'authentication required' } }), 'stream-json');
+  assert.equal(parsed.text, 'authentication required');
+  assert.equal(parsed.error, 'authentication required');
 });
 
 test('Grok and Antigravity runners execute through the shared supervisor', async () => {

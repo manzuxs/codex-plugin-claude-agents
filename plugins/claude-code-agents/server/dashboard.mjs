@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -10,6 +11,34 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=u
 const MAX_BODY_BYTES = 256 * 1024;
 const MARKETPLACE_NAME = 'local-multi-cli-agents';
 const PLUGIN_SELECTOR = `multi-cli-agents@${MARKETPLACE_NAME}`;
+
+function tomlSection(content, header) {
+  const lines = String(content || '').split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === header);
+  if (start < 0) return '';
+  const endOffset = lines.slice(start + 1).findIndex((line) => line.trim().startsWith('['));
+  const end = endOffset < 0 ? lines.length : start + 1 + endOffset;
+  return lines.slice(start + 1, end).join('\n');
+}
+
+export function parseCodexPluginConfig(content) {
+  const marketplace = tomlSection(content, `[marketplaces.${MARKETPLACE_NAME}]`);
+  const plugin = tomlSection(content, `[plugins."${PLUGIN_SELECTOR}"]`);
+  return {
+    marketplaceAvailable: Boolean(marketplace),
+    marketplaceSourceType: marketplace.match(/^source_type\s*=\s*["']([^"']+)["']/m)?.[1],
+    installed: Boolean(plugin) && !/^enabled\s*=\s*false\s*$/m.test(plugin),
+  };
+}
+
+function configuredInstallationState() {
+  try {
+    const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+    return parseCodexPluginConfig(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'));
+  } catch {
+    return { marketplaceAvailable: false, marketplaceSourceType: undefined, installed: false };
+  }
+}
 
 function json(res, status, value) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -55,11 +84,12 @@ async function installationState(repoRoot) {
     marketplace = JSON.parse(marketplaces.stdout).marketplaces?.find((item) => item.name === MARKETPLACE_NAME);
   } catch {}
   const pluginLine = output.split('\n').find((line) => line.trim().startsWith(PLUGIN_SELECTOR));
+  const configured = configuredInstallationState();
   return {
     codexAvailable: listed.error === undefined,
-    marketplaceAvailable: Boolean(marketplace),
-    marketplaceSourceType: marketplace?.marketplaceSource?.sourceType,
-    installed: pluginLine?.includes('installed, enabled') || false,
+    marketplaceAvailable: Boolean(marketplace) || configured.marketplaceAvailable,
+    marketplaceSourceType: marketplace?.marketplaceSource?.sourceType || configured.marketplaceSourceType,
+    installed: pluginLine?.includes('installed, enabled') || configured.installed,
     installedVersion: pluginLine?.match(/installed, enabled\s+(\S+)/)?.[1],
   };
 }
@@ -127,7 +157,9 @@ export async function startDashboard({ service, pluginRoot, port = 0, open = fal
       if (req.method === 'POST' && url.pathname === '/api/config') {
         const body = await readBody(req);
         const agent = resolveAgent(service.registry, body.agent);
-        const stored = service.writeAgentConfig({ agent, runner: body.runner, values: body.values });
+        const runner = body.runner || 'default';
+        if (runner !== 'default') service.writeAgentConfig({ agent, runner: 'default', values: { runner } });
+        const stored = service.writeAgentConfig({ agent, runner, values: body.values });
         return json(res, 200, { ok: true, database: stored.database, agents: service.listAgents({ cwd: body.cwd || repoRoot }) });
       }
       if (req.method === 'POST' && url.pathname === '/api/run') {

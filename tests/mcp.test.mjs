@@ -5,13 +5,39 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startDashboard } from '../plugins/claude-code-agents/server/dashboard.mjs';
+import { parseCodexPluginConfig, startDashboard } from '../plugins/claude-code-agents/server/dashboard.mjs';
 import { JobStore } from '../plugins/claude-code-agents/server/lib/job-store.mjs';
 import { PLUGIN_VERSION } from '../plugins/claude-code-agents/server/lib/version.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pluginRoot = process.env.CLAUDE_AGENTS_TEST_PLUGIN_ROOT || path.join(root, 'plugins', 'claude-code-agents');
 const server = path.join(pluginRoot, 'server', 'index.mjs');
+
+test('skill metadata uses Multi-CLI labels and the canonical MCP dependency', () => {
+  const skillRoot = path.join(pluginRoot, 'skills');
+  const orchestratorYaml = fs.readFileSync(path.join(skillRoot, 'claude-orchestrator', 'agents', 'openai.yaml'), 'utf8');
+  const adminYaml = fs.readFileSync(path.join(skillRoot, 'claude-agent-admin', 'agents', 'openai.yaml'), 'utf8');
+  const orchestratorSkill = fs.readFileSync(path.join(skillRoot, 'claude-orchestrator', 'SKILL.md'), 'utf8');
+  assert.match(orchestratorYaml, /display_name: "Multi-CLI Agent 编排"/);
+  assert.doesNotMatch(orchestratorYaml, /Claude Code/);
+  assert.match(orchestratorYaml, /value: "multi_cli_agents"/);
+  assert.match(adminYaml, /value: "multi_cli_agents"/);
+  assert.doesNotMatch(`${orchestratorYaml}\n${adminYaml}\n${orchestratorSkill}`, /claude_code_agents/);
+});
+
+test('dashboard detects the installed plugin from Codex config when marketplace listing is unavailable', () => {
+  const state = parseCodexPluginConfig(`
+[marketplaces.local-multi-cli-agents]
+source_type = "local"
+source = "/tmp/multi-cli-agents"
+
+[plugins."multi-cli-agents@local-multi-cli-agents"]
+enabled = true
+`);
+  assert.deepEqual(state, { marketplaceAvailable: true, marketplaceSourceType: 'local', installed: true });
+  assert.equal(parseCodexPluginConfig('[plugins."other@market"]\nenabled = true').installed, false);
+  assert.equal(parseCodexPluginConfig('[plugins."multi-cli-agents@local-multi-cli-agents"]\nenabled = false').installed, false);
+});
 
 function isolatedEnv(name, extra = {}) {
   return { ...process.env, CLAUDE_AGENTS_DATA_ROOT: fs.mkdtempSync(path.join(os.tmpdir(), `claude-agent-${name}-`)), ...extra };
@@ -104,6 +130,7 @@ test('dashboard serves browser modules with JavaScript MIME types', async () => 
 test('dashboard enforces token, body, static path, task API, and SSE boundaries', async () => {
   const agent = { id: 'backend-engineer', name: '后端工程师', prefix: 'BACKEND_ENGINEER' };
   let capturedRun;
+  const configWrites = [];
   const service = {
     registry: { byId: new Map([[agent.id, agent]]), byAlias: new Map() },
     config: {
@@ -116,7 +143,7 @@ test('dashboard enforces token, body, static path, task API, and SSE boundaries'
     listAgents: () => [agent],
     runtimeFor: () => ({}),
     status: (jobId) => jobId ? { jobId, status: 'completed' } : [],
-    writeAgentConfig: () => ({ database: '/tmp/claude-agents.sqlite' }),
+    writeAgentConfig: (input) => { configWrites.push(input); return { database: '/tmp/claude-agents.sqlite' }; },
     run: async (input) => { capturedRun = input; return { ok: true, jobId: 'job-1', status: 'starting' }; },
     cancel: (jobId) => ({ ok: true, jobId, status: 'cancelled' }),
     deleteJob: (jobId) => ({ ok: true, jobId }),
@@ -161,6 +188,15 @@ test('dashboard enforces token, body, static path, task API, and SSE boundaries'
       body: JSON.stringify({ agent: agent.id, values: { model: 'sonnet' } }),
     });
     assert.equal(config.status, 200);
+
+    const grokConfig = await fetch(`${running.url}/api/config`, {
+      method: 'POST',
+      headers: { 'x-claude-agents-token': token, 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: agent.id, runner: 'grok', values: { model: 'grok-4.5' } }),
+    });
+    assert.equal(grokConfig.status, 200);
+    assert.deepEqual(configWrites.at(-2), { agent, runner: 'default', values: { runner: 'grok' } });
+    assert.deepEqual(configWrites.at(-1), { agent, runner: 'grok', values: { model: 'grok-4.5' } });
 
     const run = await fetch(`${running.url}/api/run`, {
       method: 'POST',
