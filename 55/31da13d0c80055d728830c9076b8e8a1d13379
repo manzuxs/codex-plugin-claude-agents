@@ -1,0 +1,21 @@
+tests/runners.test.mjs
+  s_3c80a8c8cd7eda::t_cabfccee478b13 262
+plugins/claude-code-agents/server/lib/runners/agy.mjs
+  s_3c80a8c8cd7eda::t_cabfccee478b13 34,44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "5531da13d0c80055d728830c9076b8e8a1d13379",
+  "prompts": {},
+  "sessions": {
+    "s_3c80a8c8cd7eda": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f93a0-5d7b-7742-9469-8ca967d42b32",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
