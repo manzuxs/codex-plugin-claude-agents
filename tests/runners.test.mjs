@@ -5,10 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCodexInvocation, parseCodexOutput } from '../plugins/claude-code-agents/server/lib/runners/codex.mjs';
-import { buildGrokInvocation, parseGrokOutput } from '../plugins/claude-code-agents/server/lib/runners/grok.mjs';
+import { buildGrokInvocation, createGrokProgressReporter, parseGrokOutput } from '../plugins/claude-code-agents/server/lib/runners/grok.mjs';
 import { buildAgyInvocation } from '../plugins/claude-code-agents/server/lib/runners/agy.mjs';
 import { loadAgentRegistry, resolveAgent, resolveAgentRuntime } from '../plugins/claude-code-agents/server/lib/agents.mjs';
-import { ClaudeAgentService } from '../plugins/claude-code-agents/server/lib/service.mjs';
+import { ClaudeAgentService, resolveRunnerTimeout } from '../plugins/claude-code-agents/server/lib/service.mjs';
 import { McpServer } from '../plugins/claude-code-agents/server/lib/mcp.mjs';
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'plugins', 'claude-code-agents');
@@ -53,6 +53,10 @@ test('Codex invocation uses only supported safe argv for each permission intent'
   assert.equal(bypass.args.includes('--agents'), false);
   assert.equal(bypass.args.filter((value) => value === request().plan).length, 0);
   assert.match(bypass.args.at(-1), /<codex_plan>/);
+
+  const deepReasoning = buildCodexInvocation({ pluginRoot, agent, runtime: codexRuntime({ effort: 'xhigh' }), request: request() });
+  const configIndex = deepReasoning.args.indexOf('--config');
+  assert.equal(deepReasoning.args[configIndex + 1], 'model_reasoning_effort="xhigh"');
 });
 
 test('Codex JSONL parser aggregates thread.started, agent message, and usage', () => {
@@ -126,8 +130,8 @@ process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tok
   }
 });
 
-test('Codex rejects unsupported effort, browser, resume, and session capabilities', () => {
-  assert.throws(() => buildCodexInvocation({ pluginRoot, agent, runtime: codexRuntime({ effort: 'high' }), request: request() }), /does not support effort/);
+test('Codex rejects unknown effort, browser, resume, and session capabilities', () => {
+  assert.throws(() => buildCodexInvocation({ pluginRoot, agent, runtime: codexRuntime({ effort: 'extreme' }), request: request() }), /does not support effort/);
   assert.throws(() => buildCodexInvocation({ pluginRoot, agent, runtime: codexRuntime(), request: request({ browserMode: 'repository' }) }), /does not support browserMode/);
   assert.throws(() => buildCodexInvocation({ pluginRoot, agent, runtime: codexRuntime(), request: request({ resume: 'old-thread' }) }), /does not support resume/);
   assert.throws(() => buildCodexInvocation({ pluginRoot, agent, runtime: codexRuntime(), request: request({ sessionId: 'new-thread' }) }), /does not support sessionId/);
@@ -156,6 +160,22 @@ test('runner defaults resolve from canonical and legacy configuration layers', a
   assert.equal(legacy.model, 'gpt-legacy');
 });
 
+test('short one-run timeouts cannot reduce the configured Runner timeout without explicit approval', () => {
+  assert.deepEqual(resolveRunnerTimeout({ configuredTimeoutMs: 3_600_000, requestedTimeoutMs: 120_000 }), {
+    configuredTimeoutMs: 3_600_000,
+    requestedTimeoutMs: 120_000,
+    effectiveTimeoutMs: 3_600_000,
+    timeoutSource: 'configured-protected',
+  });
+  assert.deepEqual(resolveRunnerTimeout({ configuredTimeoutMs: 3_600_000, requestedTimeoutMs: 120_000, allowShorterTimeout: true }), {
+    configuredTimeoutMs: 3_600_000,
+    requestedTimeoutMs: 120_000,
+    effectiveTimeoutMs: 120_000,
+    timeoutSource: 'request-override',
+  });
+  assert.equal(resolveRunnerTimeout({ configuredTimeoutMs: 120_000, requestedTimeoutMs: 600_000 }).effectiveTimeoutMs, 600_000);
+});
+
 test('non-Claude runners do not inherit Claude-only role models', () => {
   const runtime = resolveAgentRuntime({ agent, runner: 'grok', env: {
     BACKEND_ENGINEER_MODEL: 'claude-role-model',
@@ -177,6 +197,7 @@ test('MCP exposes list_runners, runner preview, and declared capabilities', asyn
   const listAgentTool = tools.find((tool) => tool.name === 'list_agents');
   assert.ok(tools.some((tool) => tool.name === 'list_runners'));
   assert.deepEqual(runTool.inputSchema.properties.runner.enum, ['claude', 'codex', 'grok', 'agy']);
+  assert.equal(runTool.inputSchema.properties.allowShorterTimeout.default, false);
   assert.deepEqual(listAgentTool.inputSchema.properties.runner.enum, ['claude', 'codex', 'grok', 'agy']);
   await server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_runners', arguments: {} } });
   const runners = JSON.parse(responses[1].result.content[0].text);
@@ -234,6 +255,25 @@ test('Grok parser preserves a structured error when no assistant text is returne
   const parsed = parseGrokOutput(JSON.stringify({ type: 'error', error: { message: 'authentication required' } }), 'stream-json');
   assert.equal(parsed.text, 'authentication required');
   assert.equal(parsed.error, 'authentication required');
+});
+
+test('Grok progress reporter coalesces token events and preserves tool events', () => {
+  const observed = [];
+  const reporter = createGrokProgressReporter({ onProgress: (progress) => observed.push(progress), secrets: ['secret-token'] });
+  reporter.push({ type: 'thought', data: 'Inspect' });
+  reporter.push({ type: 'thought', data: ' files' });
+  reporter.push({ type: 'thought', data: ' secret' });
+  reporter.push({ type: 'thought', data: '-token' });
+  reporter.push({ type: 'text', data: '开始' });
+  reporter.push({ type: 'text', data: '修改' });
+  reporter.push({ type: 'tool_call', data: { name: 'edit_file', input: { path: 'src/app.ts' } } });
+  reporter.flush();
+  assert.deepEqual(observed.map((progress) => progress.event), [
+    { type: 'thought', data: 'Inspect files [REDACTED]' },
+    { type: 'text', data: '开始修改' },
+    { type: 'tool_call', data: { name: 'edit_file', input: { path: 'src/app.ts' } } },
+  ]);
+  assert.equal(observed.at(-1).lastTool, 'edit_file');
 });
 
 test('Grok and Antigravity runners execute through the shared supervisor', async () => {

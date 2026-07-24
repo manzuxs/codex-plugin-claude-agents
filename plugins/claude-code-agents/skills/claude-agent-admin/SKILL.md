@@ -22,6 +22,8 @@ description: 配置、检查、排障或扩展多 CLI Agent 插件；处理 Runn
 4. 启动 Codex 的进程环境变量
 5. 单次 `run_agent` 的非秘密覆盖字段
 
+单次 `timeoutMs` 默认只能延长角色配置。缩短 Runner 执行时间必须由用户明确要求，并同时设置 `allowShorterTimeout=true`。等待 MCP 返回使用 `job_wait.timeout_ms`，不要用 Runner 超时代替等待超时。
+
 不要通过单次工具参数传递真实密钥。
 
 ## 每个智能体的变量

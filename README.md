@@ -242,7 +242,7 @@ The plugin checks repository dependencies, validates MCP configuration, inspects
 ```text
 acceptanceCriteria, context, cwd, background, persistOnDisconnect,
 leaseTimeoutMs, dryRun, resume, sessionId, model, effort,
-permissionMode, timeoutMs, maxBudgetUsd, allowedTools, disallowedTools,
+permissionMode, timeoutMs, allowShorterTimeout, maxBudgetUsd, allowedTools, disallowedTools,
 browserMode, browserMcpProfile
 ```
 
@@ -251,6 +251,8 @@ browserMode, browserMcpProfile
 ### Background jobs
 
 Sequential work defaults to `background=false`, so the MCP request waits and Codex resumes once with the compact result. Use `background=true` for parallel or explicitly monitored work, then call `job_wait` once; the MCP server waits for the terminal state outside the Codex model loop. `job_status` is read-only, and Worker activity renews the lease without Codex polling.
+
+`timeoutMs` controls Runner execution and should normally be omitted so the configured role timeout applies. A one-run value may extend that timeout; shortening it also requires `allowShorterTimeout=true`. `job_wait.timeout_ms` only limits how long the caller waits and never terminates the Runner.
 
 Use `background=true` only when the job must return a Job ID first, run in parallel, or expose progress. Use `persistOnDisconnect=true` only when the user explicitly wants the job to survive the Codex session.
 

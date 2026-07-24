@@ -23,7 +23,7 @@ export const RUNNER_CAPABILITIES = Object.freeze({
     supports: Object.freeze({
       model: true,
       defaultModel: 'gpt-5-codex',
-      effort: ['default'],
+      effort: ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
       permissionMode: ['default', 'auto', 'bypassPermissions', 'plan'],
       resume: false,
       sessionId: false,

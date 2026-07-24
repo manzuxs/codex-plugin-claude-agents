@@ -39,11 +39,17 @@ process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result
       plan: '1. Inspect. 2. Implement. 3. Test.',
       cwd: temp,
       background: true,
+      timeoutMs: 120_000,
     });
     assert.equal(created.ok, true);
     assert.equal(created.nextPollSeconds, 30);
     assert.equal(created.pollAttempt, 0);
     assert.equal(created.progressRevision, 0);
+    const persistedRequest = service.jobs.readJson(created.jobId, 'request.json');
+    assert.equal(persistedRequest.requestedTimeoutMs, 120_000);
+    assert.equal(persistedRequest.effectiveTimeoutMs, 1_800_000);
+    assert.equal(persistedRequest.timeoutSource, 'configured-protected');
+    assert.equal(persistedRequest.runtimeOverrides.timeoutMs, 1_800_000);
     const finished = await waitFor(() => {
       const status = service.status(created.jobId);
       return ['completed', 'failed'].includes(status.status) ? status : null;
@@ -53,6 +59,7 @@ process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result
     assert.equal(stored.result.status, 'completed');
     assert.equal(stored.result.summary, 'background complete');
     assert.equal(stored.result.sessionId, '22222222-2222-4222-8222-222222222222');
+    assert.equal(stored.result.effectiveTimeoutMs, 1_800_000);
     assert.equal(stored.meta.planSha256, stored.result.planSha256);
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_BIN;
@@ -266,6 +273,16 @@ test('compact status and result enforce their byte limits for oversized metadata
     service.jobs.writeMeta(listed.jobId, { status: 'failed', error: 'L'.repeat(4000) });
   }
   assert.ok(Buffer.byteLength(JSON.stringify(service.status(undefined, { limit: 20 })), 'utf8') <= 8192);
+});
+
+test('compact failed results prioritize the actionable error over streamed output', () => {
+  const compact = compactResult({
+    ok: false,
+    timedOut: true,
+    error: 'Grok CLI exceeded the effective timeout of 3600000ms.',
+    text: '{"type":"thought","data":"partial output"}',
+  });
+  assert.equal(compact.summary, 'Grok CLI exceeded the effective timeout of 3600000ms.');
 });
 
 test('oversized agent reports preserve high-priority evidence instead of slicing one text prefix', () => {

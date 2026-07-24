@@ -6,11 +6,24 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolveAgent } from './lib/agents.mjs';
+import { RUNNER_CAPABILITIES } from './lib/runners/capabilities.mjs';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.png': 'image/png' };
 const MAX_BODY_BYTES = 256 * 1024;
 const MARKETPLACE_NAME = 'local-multi-cli-agents';
 const PLUGIN_SELECTOR = `multi-cli-agents@${MARKETPLACE_NAME}`;
+
+export function validateRunnerConfig(runnerId, values = {}) {
+  const runner = RUNNER_CAPABILITIES[runnerId];
+  if (!runner) throw new Error(`Unknown runner "${runnerId}".`);
+  for (const field of ['effort', 'permissionMode', 'outputFormat']) {
+    const value = values[field];
+    const supported = runner.supports[field] || [];
+    if (value !== undefined && value !== '' && !supported.includes(String(value))) {
+      throw new Error(`${runner.name} ${field} must be one of: ${supported.join(', ')}; received ${value}`);
+    }
+  }
+}
 
 function tomlSection(content, header) {
   const lines = String(content || '').split(/\r?\n/);
@@ -158,6 +171,8 @@ export async function startDashboard({ service, pluginRoot, port = 0, open = fal
         const body = await readBody(req);
         const agent = resolveAgent(service.registry, body.agent);
         const runner = body.runner || 'default';
+        const targetRunner = runner === 'default' ? service.runtimeFor(agent, body.cwd || repoRoot).runner || 'claude' : runner;
+        validateRunnerConfig(targetRunner, body.values);
         if (runner !== 'default') service.writeAgentConfig({ agent, runner: 'default', values: { runner } });
         const stored = service.writeAgentConfig({ agent, runner, values: body.values });
         return json(res, 200, { ok: true, database: stored.database, agents: service.listAgents({ cwd: body.cwd || repoRoot }) });

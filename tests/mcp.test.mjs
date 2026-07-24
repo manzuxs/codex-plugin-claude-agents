@@ -5,7 +5,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseCodexPluginConfig, startDashboard } from '../plugins/claude-code-agents/server/dashboard.mjs';
+import { parseCodexPluginConfig, startDashboard, validateRunnerConfig } from '../plugins/claude-code-agents/server/dashboard.mjs';
 import { JobStore } from '../plugins/claude-code-agents/server/lib/job-store.mjs';
 import { PLUGIN_VERSION } from '../plugins/claude-code-agents/server/lib/version.mjs';
 
@@ -37,6 +37,13 @@ enabled = true
   assert.deepEqual(state, { marketplaceAvailable: true, marketplaceSourceType: 'local', installed: true });
   assert.equal(parseCodexPluginConfig('[plugins."other@market"]\nenabled = true').installed, false);
   assert.equal(parseCodexPluginConfig('[plugins."multi-cli-agents@local-multi-cli-agents"]\nenabled = false').installed, false);
+});
+
+test('dashboard validates configuration against Runner capabilities before persistence', () => {
+  assert.doesNotThrow(() => validateRunnerConfig('codex', { effort: 'default', permissionMode: 'bypassPermissions', outputFormat: 'stream-json' }));
+  assert.doesNotThrow(() => validateRunnerConfig('codex', { effort: 'xhigh' }));
+  assert.throws(() => validateRunnerConfig('codex', { effort: 'extreme' }), /Codex CLI effort must be one of:/);
+  assert.throws(() => validateRunnerConfig('agy', { outputFormat: 'stream-json' }), /Antigravity CLI outputFormat must be one of: text/);
 });
 
 function isolatedEnv(name, extra = {}) {
@@ -197,6 +204,16 @@ test('dashboard enforces token, body, static path, task API, and SSE boundaries'
     assert.equal(grokConfig.status, 200);
     assert.deepEqual(configWrites.at(-2), { agent, runner: 'default', values: { runner: 'grok' } });
     assert.deepEqual(configWrites.at(-1), { agent, runner: 'grok', values: { model: 'grok-4.5' } });
+
+    const codexConfig = await fetch(`${running.url}/api/config`, {
+      method: 'POST',
+      headers: { 'x-claude-agents-token': token, 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: agent.id, runner: 'codex', values: { effort: 'xhigh' } }),
+    });
+    assert.equal(codexConfig.status, 200);
+    assert.deepEqual(configWrites.at(-2), { agent, runner: 'default', values: { runner: 'codex' } });
+    assert.deepEqual(configWrites.at(-1), { agent, runner: 'codex', values: { effort: 'xhigh' } });
+    assert.equal(configWrites.length, 5);
 
     const run = await fetch(`${running.url}/api/run`, {
       method: 'POST',

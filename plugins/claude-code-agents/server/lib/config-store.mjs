@@ -10,7 +10,7 @@ const FIELD_SUFFIX = Object.freeze({
 });
 
 const ENUMS = Object.freeze({
-  effort: new Set(['default', 'low', 'medium', 'high', 'xhigh', 'max']),
+  effort: new Set(['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']),
   permissionMode: new Set(['auto', 'plan', 'acceptEdits', 'bypassPermissions']),
   apiKeyKind: new Set(['auth_token', 'api_key']),
   runner: new Set(['claude', 'codex', 'grok', 'agy']),

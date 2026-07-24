@@ -9,7 +9,9 @@ function unsupported(label, value, supported) {
 }
 
 function validateRuntime(runtime, request) {
-  if (runtime.effort && runtime.effort !== 'default') unsupported('effort', runtime.effort, []);
+  if (runtime.effort && !RUNNER_CAPABILITIES.codex.supports.effort.includes(runtime.effort)) {
+    unsupported('effort', runtime.effort, RUNNER_CAPABILITIES.codex.supports.effort);
+  }
   if (request.resume || request.sessionId) unsupported(request.resume ? 'resume' : 'sessionId', 'provided', []);
   if ((request.browserMode || 'none') !== 'none') unsupported('browserMode', request.browserMode, ['none']);
   if (runtime.permissionMode === 'dontAsk' || runtime.permissionMode === 'acceptEdits') {
@@ -34,6 +36,7 @@ export function buildCodexInvocation({ pluginRoot, agent, runtime, request, cwd 
   })}\n\n<role_protocol>\n${specialistPrompt}\n</role_protocol>`;
   const args = ['exec', '--json', '--cd', cwd || request.cwd || process.cwd()];
   if (runtime.model) args.push('--model', runtime.model);
+  if (runtime.effort && runtime.effort !== 'default') args.push('--config', `model_reasoning_effort="${runtime.effort}"`);
   if (runtime.permissionMode === 'bypassPermissions') args.push('--dangerously-bypass-approvals-and-sandbox');
   else if (runtime.permissionMode === 'plan') args.push('--sandbox', 'read-only');
   else if (runtime.permissionMode === 'auto' || runtime.permissionMode === 'default') args.push('--sandbox', 'workspace-write');
@@ -119,7 +122,7 @@ export const codexRunner = Object.freeze({
         cwd,
         command: invocation.command,
         args: redactArgs(invocation.args),
-        runtime: { model: runtime.model, permissionMode: runtime.permissionMode, outputFormat: runtime.outputFormat },
+        runtime: { model: runtime.model, effort: runtime.effort, permissionMode: runtime.permissionMode, outputFormat: runtime.outputFormat },
         promptPreview: invocation.prompt.slice(0, 2000),
       };
     }

@@ -76,12 +76,16 @@ function eventText(event) {
 export function parseGrokOutput(stdout, outputFormat) {
   if (outputFormat === 'text') return { text: stdout.trim(), structured: stdout.trim() ? undefined : [] };
   const parsed = parseJsonLines(stdout);
-  const messages = parsed.events.map(eventText).filter(Boolean);
+  const messages = parsed.events.filter((event) => !['thought', 'text'].includes(String(event?.type || '').toLowerCase())).map(eventText).filter(Boolean);
+  const streamedText = parsed.events
+    .filter((event) => String(event?.type || '').toLowerCase() === 'text' && typeof event?.data === 'string')
+    .map((event) => event.data)
+    .join('');
   const terminal = [...parsed.events].reverse().find((event) => /completed|result|final|error|failed/i.test(String(event?.type || event?.status || '')));
-  const responseText = eventText(terminal) || terminal?.result || terminal?.output || terminal?.error?.message || terminal?.error || parsed.text;
+  const responseText = eventText(terminal) || terminal?.result || terminal?.output || terminal?.error?.message || terminal?.error;
   const usage = terminal?.usage || [...parsed.events].reverse().find((event) => event?.usage)?.usage;
   return {
-    text: messages.at(-1) || responseText || parsed.text || 'Grok CLI 未返回可读结果。',
+    text: messages.at(-1) || responseText || streamedText || parsed.text || 'Grok CLI 未返回可读结果。',
     sessionId: terminal?.session_id || terminal?.sessionId || terminal?.conversation_id || null,
     inputTokens: usage?.input_tokens ?? usage?.input ?? null,
     outputTokens: usage?.output_tokens ?? usage?.output ?? null,
@@ -92,14 +96,48 @@ export function parseGrokOutput(stdout, outputFormat) {
 
 function classifyGrokEvent(event) {
   const type = String(event?.type || event?.status || '').toLowerCase();
+  const toolName = String(event?.tool_name || event?.name || event?.data?.name || type);
+  if (/error|failed/.test(type)) return { phase: 'failed', verificationState: 'failed' };
   if (/completed|result|final/.test(type)) return { phase: 'finalizing', verificationState: 'passed' };
-  if (/tool|command|shell|edit/.test(type)) return { phase: 'implementing', lastTool: type.slice(0, 64) };
+  if (/tool|command|shell|edit|write|patch/.test(type)) {
+    return { phase: /test|check|lint/.test(toolName) ? 'verifying' : 'implementing', lastTool: toolName.slice(0, 64), lastToolSummary: toolName.slice(0, 256) };
+  }
   if (/message|reason|turn/.test(type)) return { phase: 'implementing' };
   return { phase: 'running' };
 }
 
 function redactEvent(event, secrets) {
   try { return redactObject(JSON.parse(redactText(JSON.stringify(event), secrets))); } catch { return undefined; }
+}
+
+export function createGrokProgressReporter({ onProgress, secrets = [], maxChunkChars = 512 } = {}) {
+  let pendingType = '';
+  let pendingData = '';
+  const emit = (event) => {
+    if (!event || !onProgress) return;
+    onProgress({ ...classifyGrokEvent(event), event, lastActivityAt: new Date().toISOString() });
+  };
+  const flush = () => {
+    if (!pendingType) return;
+    emit({ type: pendingType, data: redactText(pendingData, secrets) });
+    pendingType = '';
+    pendingData = '';
+  };
+  const push = (event) => {
+    const type = String(event?.type || '').toLowerCase();
+    if (['thought', 'text'].includes(type) && typeof event?.data === 'string') {
+      if (pendingType && pendingType !== type) flush();
+      pendingType = type;
+      pendingData += event.data;
+      if (pendingData.length >= maxChunkChars || event.data.includes('\n')) flush();
+      return;
+    }
+    const safeEvent = redactEvent(event, secrets);
+    if (!safeEvent) return;
+    flush();
+    emit(safeEvent);
+  };
+  return { push, flush };
 }
 
 export const grokRunner = Object.freeze({
@@ -129,6 +167,7 @@ export const grokRunner = Object.freeze({
     }
     const secrets = collectSensitiveValues(invocation.env);
     let streamBuffer = '';
+    const progressReporter = createGrokProgressReporter({ onProgress, secrets });
     const result = await superviseProcess({
       command: invocation.command,
       args: invocation.args,
@@ -144,13 +183,15 @@ export const grokRunner = Object.freeze({
         while ((index = streamBuffer.indexOf('\n')) >= 0) {
           const line = streamBuffer.slice(0, index); streamBuffer = streamBuffer.slice(index + 1);
           try {
-            const event = JSON.parse(line);
-            const progress = classifyGrokEvent(event);
-            onProgress?.({ ...progress, event: redactEvent(event, secrets), lastActivityAt: new Date().toISOString() });
+            progressReporter.push(JSON.parse(line));
           } catch {}
         }
       },
     });
+    if (streamBuffer.trim()) {
+      try { progressReporter.push(JSON.parse(streamBuffer)); } catch {}
+    }
+    progressReporter.flush();
     const parsed = parseGrokOutput(result.stdout, runtime.outputFormat);
     return {
       ok: result.code === 0 && !result.cancelled && !result.timedOut,

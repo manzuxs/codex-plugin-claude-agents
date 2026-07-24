@@ -279,7 +279,12 @@ function patchKeyedList(container, records, keyOf, htmlFor, emptyHtml, fingerpri
 
 function eventTool(event) {
   const content = event?.message?.content;
-  return Array.isArray(content) ? content.find((item) => item?.type === 'tool_use') : null;
+  const contentTool = Array.isArray(content) ? content.find((item) => item?.type === 'tool_use') : null;
+  if (contentTool) return contentTool;
+  const type = String(event?.type || '').toLowerCase();
+  if (!/tool|command|shell|edit|write|patch/.test(type)) return null;
+  const data = event?.data && typeof event.data === 'object' ? event.data : {};
+  return { name: event?.tool_name || event?.name || data.name || type, input: event?.input || data.input || data };
 }
 function eventClass(event) {
   const tool = eventTool(event);
@@ -303,10 +308,11 @@ function eventView(event) {
   if (event?.type === 'system') return ['系统事件', 'SYS', event.subtype || event.result || '任务初始化'];
   const content = event?.message?.content;
   const text = Array.isArray(content) ? content.map((item) => item?.text || '').filter(Boolean).join(' ') : content;
+  const streamText = typeof event?.data === 'string' ? event.data : '';
   const type = String(event?.type || event?.status || event?.subtype || '').trim();
   const error = event?.error?.message || event?.error || event?.detail;
   if (error) return ['运行错误', 'ERR', String(error)];
-  if (text) return ['模型消息', 'MSG', text];
+  if (text || streamText) return [event?.type === 'thought' ? '推理摘要' : '模型消息', 'MSG', text || streamText];
   if (type) return ['运行事件', 'EVT', type];
   return ['运行事件', 'EVT', '未命名事件'];
 }
@@ -584,9 +590,24 @@ function renderConfigOptions() {
   runnerSelect.value = [...runnerSelect.options].some((option) => option.value === runnerPrevious) ? runnerPrevious : 'default';
   syncCustomSelect(runnerSelect);
 }
+const configOptionLabels = {
+  default: '默认', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最大',
+  auto: '自动确认', plan: '仅规划', acceptEdits: '自动接受编辑', bypassPermissions: '跳过权限确认', dontAsk: '禁止询问',
+  text: '文本', json: 'JSON', 'stream-json': '流式 JSON',
+};
+function fillCapabilitySelect(selector, values, configuredValue, fallbackValue) {
+  const select = $(selector); const supported = Array.isArray(values) && values.length ? values : [configuredValue || fallbackValue];
+  select.innerHTML = supported.map((value) => `<option value="${esc(value)}">${esc(configOptionLabels[value] || value)}</option>`).join('');
+  select.value = supported.includes(configuredValue) ? configuredValue : supported.includes(fallbackValue) ? fallbackValue : supported[0];
+  syncCustomSelect(select);
+}
 function fillConfig() {
   const agent = state.agents.find((item) => item.id === $('#config-agent').value) || state.agents[0]; const runner = $('#config-runner').value || 'default'; const config = runner === 'default' ? (agent?.configured || {}) : (agent?.configuredByRunner?.[runner] || {});
-  $('#cfg-model').value = config.model || ''; $('#cfg-effort').value = config.effort || 'high'; $('#cfg-permission').value = config.permissionMode || 'auto'; $('#cfg-output').value = config.outputFormat || 'json'; $('#cfg-timeout').value = config.timeoutMs || 1800000; $('#cfg-budget').value = config.maxBudgetUsd ?? 0; $('#cfg-gateway').value = config.gatewayUrl || ''; $('#cfg-key-kind').value = config.apiKeyKind || 'auth_token'; $('#cfg-api-key').value = ''; $('#cfg-browser-profiles').value = config.browserMcpConfigsJson || '{}';
+  const runnerId = runner === 'default' ? config.runner : runner; const capabilities = state.runners.find((item) => item.id === runnerId)?.capabilities || {};
+  fillCapabilitySelect('#cfg-effort', capabilities.effort, config.effort, capabilities.defaultEffort || 'high');
+  fillCapabilitySelect('#cfg-permission', capabilities.permissionMode, config.permissionMode, 'auto');
+  fillCapabilitySelect('#cfg-output', capabilities.outputFormat, config.outputFormat, capabilities.defaultOutputFormat || 'json');
+  $('#cfg-model').value = config.model || ''; $('#cfg-timeout').value = config.timeoutMs || 1800000; $('#cfg-budget').value = config.maxBudgetUsd ?? 0; $('#cfg-gateway').value = config.gatewayUrl || ''; $('#cfg-key-kind').value = config.apiKeyKind || 'auth_token'; $('#cfg-api-key').value = ''; $('#cfg-browser-profiles').value = config.browserMcpConfigsJson || '{}';
   syncCustomSelects();
 }
 function renderInstall() {
@@ -644,7 +665,11 @@ function renderSession(diff, source) {
   const summary = String(result.summary || (job ? '该任务暂无保存结果摘要。' : '选择一条任务记录后查看执行结果。'));
   $('#overview-title').textContent = title; $('#overview-summary').textContent = summary.length > 320 ? `${summary.slice(0, 317)}...` : summary; $('#overview-verification').textContent = result.verificationSummary || '';
   $('#overview-status').textContent = phaseLabel(job?.phase, status); $('#overview-duration').textContent = durationText(elapsedFor(job)); $('#overview-check').textContent = verification === 'passed' ? '验证通过' : verification === 'failed' ? '验证失败' : job ? '尚未验证' : '等待执行'; $('#overview-cost').textContent = Number.isFinite(Number(job?.costUsd)) ? `$${Number(job.costUsd).toFixed(4)}` : '—';
-  $('#session-runtime').textContent = `Runner ${job?.runner || config.runner || 'claude'} · 模型 ${config.model || '—'} · 思考强度 ${config.effort || '—'} · 权限 ${config.permissionMode || '—'}`;
+  const effectiveTimeout = job?.effectiveTimeoutMs || config.timeoutMs;
+  const timeoutDetail = job?.timeoutSource === 'configured-protected'
+    ? `超时 ${durationText(effectiveTimeout)}（已忽略短覆盖 ${durationText(job.requestedTimeoutMs)}）`
+    : `超时 ${durationText(effectiveTimeout)}${job?.timeoutSource === 'request-override' ? '（单次覆盖）' : '（角色配置）'}`;
+  $('#session-runtime').textContent = `Runner ${job?.runner || config.runner || 'claude'} · 模型 ${config.model || '—'} · 思考强度 ${config.effort || '—'} · 权限 ${config.permissionMode || '—'} · ${timeoutDetail}`;
   const visible = filteredEvents(); $('#event-count').textContent = state.events.length; $('#tool-count').textContent = state.events.filter((event) => eventClass(event).tool).length; $('#file-count').textContent = state.events.filter((event) => eventClass(event).file).length; $('#check-count').textContent = state.events.filter((event) => eventClass(event).check).length;
   patchKeyedList($('#event-viewport'), visible, (event) => event.seq, (event) => { const [kind, icon, detail] = eventView(event); return `<div class="event-row"><span class="event-time">${esc(timeText(event.at))}</span><span class="event-dot">${esc(icon)}</span><span class="event-kind">${esc(kind)}</span><span class="event-main"><strong>${esc(event.subtype || kind)}</strong><small>${esc(detail)}</small></span><span class="event-result">${event.type === 'result' ? '完成' : ''}</span></div>`; }, '<div class="empty-events"><strong>此分类暂无记录</strong><small>历史快照可能没有完整事件流。</small></div>');
   if (motionAllowed(source)) (diff?.newEvents || []).forEach((event) => triggerMotion(motionElement(`#event-viewport [data-motion-key="${CSS.escape(String(event.seq))}"]`), 'motion-event-enter', motionDuration.enter));

@@ -81,7 +81,7 @@ function capObject(value, maxBytes, { shrinkKeys, dropKeys, fallback }) {
 
 function compactMeta(meta) {
   if (!meta) return null;
-  const keys = ['jobId', 'status', 'role', 'agent', 'runner', 'model', 'capabilitiesUsed', 'task', 'cwd', 'browserMode', 'planSha256', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'durationMs', 'turns', 'turnsObserved', 'costUsd', 'inputTokens', 'outputTokens', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'browserCapability', 'browserBackend', 'installationHint', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
+  const keys = ['jobId', 'status', 'role', 'agent', 'runner', 'model', 'capabilitiesUsed', 'task', 'cwd', 'browserMode', 'planSha256', 'configuredTimeoutMs', 'requestedTimeoutMs', 'effectiveTimeoutMs', 'timeoutSource', 'createdAt', 'startedAt', 'finishedAt', 'updatedAt', 'exitCode', 'sessionId', 'error', 'cancellationReason', 'persistOnDisconnect', 'leaseExpiresAt', 'resultAvailable', 'progressRevision', 'phase', 'elapsedMs', 'durationMs', 'turns', 'turnsObserved', 'costUsd', 'inputTokens', 'outputTokens', 'lastActivityAt', 'lastTool', 'lastToolSummary', 'verificationState', 'browserCapability', 'browserBackend', 'installationHint', 'changedSinceLastPoll', 'pollAttempt', 'nextPollSeconds'];
   const compact = Object.fromEntries(keys.filter((key) => meta[key] !== undefined).map((key) => [key, meta[key]]));
   if (ACTIVE_JOB_STATUSES.has(meta.status)) compact.elapsedMs = Math.max(Number(meta.elapsedMs || 0), Date.now() - Date.parse(meta.startedAt || meta.createdAt));
   else if (meta.elapsedMs !== undefined) compact.elapsedMs = meta.elapsedMs;
@@ -216,14 +216,17 @@ export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS, 
     verificationSummary: result.verificationSummary ?? terminal.verificationSummary ?? terminal.verification_summary,
   } : result;
   const compact = {};
-  const keys = ['status', 'role', 'agent', 'runner', 'model', 'capabilitiesUsed', 'jobId', 'sessionId', 'planSha256', 'durationMs', 'turns', 'costUsd', 'verificationSummary', 'blocked', 'browserCapability', 'browserBackend', 'browserPurpose', 'browserToolUseObserved', 'installationHint'];
+  const keys = ['status', 'role', 'agent', 'runner', 'model', 'capabilitiesUsed', 'jobId', 'sessionId', 'planSha256', 'configuredTimeoutMs', 'requestedTimeoutMs', 'effectiveTimeoutMs', 'timeoutSource', 'durationMs', 'turns', 'costUsd', 'verificationSummary', 'blocked', 'browserCapability', 'browserBackend', 'browserPurpose', 'browserToolUseObserved', 'installationHint'];
   compact.status = source.status || statusForResult(source);
   for (const key of keys) if (source[key] !== undefined) compact[key] = key === 'verificationSummary' ? String(source[key]) : source[key];
-  const summary = truncateText(source.summary ?? source.text ?? source.error ?? source.stderr, maxTextChars);
+  const summarySource = source.ok === false
+    ? source.error ?? source.summary ?? source.text ?? source.stderr
+    : source.summary ?? source.text ?? source.error ?? source.stderr;
+  const summary = truncateText(summarySource, maxTextChars);
   if (summary.value !== undefined) compact.summary = summary.value;
   if (summary.truncated) compact.truncated = true;
   if (jsonBytes(compact) > maxBytes) {
-    const evidence = buildEvidenceView(source.summary ?? source.text ?? source.error ?? source.stderr, source.verificationSummary);
+    const evidence = buildEvidenceView(summarySource, source.verificationSummary);
     if (evidence) {
       delete compact.summary;
       delete compact.verificationSummary;
@@ -233,19 +236,35 @@ export function compactResult(result, maxTextChars = DEFAULT_RESULT_TEXT_CHARS, 
   return capCompactResult(compact, maxBytes);
 }
 
-function runtimeOverrides(input) {
+function runtimeOverrides(input, runtime) {
   return {
     runner: input.runner,
     model: input.model,
     effort: input.effort,
     permissionMode: input.permissionMode,
-    timeoutMs: input.timeoutMs,
+    timeoutMs: runtime?.timeoutMs ?? input.timeoutMs,
     maxBudgetUsd: input.maxBudgetUsd,
     outputFormat: input.outputFormat,
     codexBin: input.codexBin,
     grokBin: input.grokBin,
     agyBin: input.agyBin,
   };
+}
+
+export function resolveRunnerTimeout({ configuredTimeoutMs, requestedTimeoutMs, allowShorterTimeout = false }) {
+  const configured = Number(configuredTimeoutMs);
+  const requested = requestedTimeoutMs === undefined || requestedTimeoutMs === null || requestedTimeoutMs === ''
+    ? null
+    : Number(requestedTimeoutMs);
+  if (!Number.isInteger(configured) || configured < 1000) throw new Error('Configured Runner timeout must be an integer >= 1000.');
+  if (requested === null) {
+    return { configuredTimeoutMs: configured, requestedTimeoutMs: null, effectiveTimeoutMs: configured, timeoutSource: 'configured' };
+  }
+  if (!Number.isInteger(requested) || requested < 1000) throw new Error('timeoutMs must be an integer >= 1000.');
+  if (requested < configured && !allowShorterTimeout) {
+    return { configuredTimeoutMs: configured, requestedTimeoutMs: requested, effectiveTimeoutMs: configured, timeoutSource: 'configured-protected' };
+  }
+  return { configuredTimeoutMs: configured, requestedTimeoutMs: requested, effectiveTimeoutMs: requested, timeoutSource: 'request-override' };
 }
 
 function resolveBrowserRequest(input, agent, runtime, cwd) {
@@ -347,20 +366,26 @@ export class ClaudeAgentService {
     const agent = resolveAgent(this.registry, input.agent);
     const cwd = assertWorkingDirectory(input.cwd);
     const requestedRunner = input.runner || undefined;
+    const configuredRuntime = this.runtimeFor(agent, cwd, { runner: requestedRunner });
+    const actualRunner = requestedRunner || configuredRuntime.runner || 'claude';
+    resolveRunner(this.runners, actualRunner);
+    const timeout = resolveRunnerTimeout({
+      configuredTimeoutMs: this.runtimeFor(agent, cwd, { runner: actualRunner }).timeoutMs,
+      requestedTimeoutMs: input.timeoutMs,
+      allowShorterTimeout: input.allowShorterTimeout === true,
+    });
     let runtime = this.runtimeFor(agent, cwd, {
       model: input.model,
       effort: input.effort,
       permissionMode: input.permissionMode,
-      timeoutMs: input.timeoutMs,
+      timeoutMs: timeout.effectiveTimeoutMs,
       maxBudgetUsd: input.maxBudgetUsd,
       outputFormat: input.outputFormat,
-      runner: requestedRunner,
+      runner: actualRunner,
       codexBin: input.codexBin,
       grokBin: input.grokBin,
       agyBin: input.agyBin,
     }, requestedRunner);
-    const actualRunner = requestedRunner || runtime.runner || 'claude';
-    resolveRunner(this.runners, actualRunner);
     runtime = { ...runtime, runner: actualRunner };
     const browser = resolveBrowserRequest(input, agent, runtime, cwd);
     if (!input.dryRun && browser.browserMode !== 'none') runtime = { ...runtime, outputFormat: 'stream-json' };
@@ -378,6 +403,7 @@ export class ClaudeAgentService {
       allowedTools: input.allowedTools || [],
       disallowedTools: input.disallowedTools || [],
       runner: actualRunner,
+      ...timeout,
       ...browser,
       dryRun: Boolean(input.dryRun),
     };
@@ -385,7 +411,7 @@ export class ClaudeAgentService {
       const persistOnDisconnect = Boolean(input.persistOnDisconnect);
       const leaseTimeoutMs = input.leaseTimeoutMs === undefined ? DEFAULT_BACKGROUND_LEASE_MS : Number(input.leaseTimeoutMs);
       if (!Number.isInteger(leaseTimeoutMs) || leaseTimeoutMs < 1000) throw new Error('leaseTimeoutMs must be an integer >= 1000');
-      const meta = this.jobs.create({ ...request, cwd, runtimeOverrides: { ...runtimeOverrides(input), outputFormat: 'stream-json' }, persistOnDisconnect, leaseTimeoutMs });
+      const meta = this.jobs.create({ ...request, cwd, runtimeOverrides: { ...runtimeOverrides(input, runtime), outputFormat: 'stream-json' }, persistOnDisconnect, leaseTimeoutMs });
       this.jobs.writeMeta(meta.jobId, {
         status: 'starting',
         persistOnDisconnect,
@@ -425,7 +451,7 @@ export class ClaudeAgentService {
     }
     if (input.dryRun) return await runAgent({ runnerRegistry: this.runners, runner: actualRunner, pluginRoot: this.pluginRoot, agent, runtime, request, cwd, signal: input.signal });
 
-    const meta = this.jobs.create({ ...request, cwd, runtimeOverrides: runtimeOverrides(input), persistOnDisconnect: false, mode: 'foreground' });
+    const meta = this.jobs.create({ ...request, cwd, runtimeOverrides: runtimeOverrides(input, runtime), persistOnDisconnect: false, mode: 'foreground' });
     this.jobs.writeMeta(meta.jobId, { status: 'starting', mode: 'foreground', persistOnDisconnect: false });
     this.ownedJobs.add(meta.jobId);
     let result;
@@ -469,6 +495,10 @@ export class ClaudeAgentService {
     }
     const status = externallyCancelled ? 'cancelled' : statusForResult(result);
     const stored = { ...result, jobId: meta.jobId, status };
+    this.jobs.writeProgress(meta.jobId, {
+      phase: status,
+      verificationState: result.ok ? 'passed' : (result.cancelled ? 'cancelled' : 'failed'),
+    });
     this.jobs.writeResult(meta.jobId, stored);
     this.jobs.writeMeta(meta.jobId, {
       status,

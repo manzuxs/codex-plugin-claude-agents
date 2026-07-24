@@ -64,6 +64,8 @@ claude -p
 
 顺序委派默认使用前台模式：`run_agent(background=false)` 由 MCP 服务端等待 Agent 完成，Codex 只恢复一次并接收紧凑结果。需要并行或先返回 Job ID 时使用 `run_agent(background=true)`，随后只调用一次 `job_wait`；状态接口只返回紧凑进度，不返回原始日志或工具输入。
 
+Runner 执行超时默认使用角色配置。不要为了限制等待时间传入较短的 `run_agent.timeoutMs`；等待时限使用 `job_wait.timeout_ms`。只有用户明确要求缩短任务执行时间时，才同时设置 `timeoutMs` 和 `allowShorterTimeout=true`。
+
 需要用户实时查看进度时，才使用 `job_status`；它是只读查询，不负责续租。
 
 前台任务收到 `notifications/cancelled` 时会终止 Claude 进程组，完整结果保存在本地 Job 文件中，默认不会返回 `structured`、raw stdout 或完整 stderr。

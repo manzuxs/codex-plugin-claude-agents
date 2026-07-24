@@ -44,7 +44,7 @@ Codex 是规划者、范围控制者和最终审查者。选定的本地 CLI Run
    - 当前对话已经有 Codex 输出且用户要求“按这个计划落地”时，原样复用该计划，不重新规划。
    - 当前对话没有可执行计划时，才输出一个有顺序的计划，至少包含目标与非目标、真实模块/文件、契约、实施步骤、风险、验证命令和验收标准。
 4. **选择一个主智能体**：按任务的主要风险选择，而不是按文件后缀选择。跨层功能优先 `fullstack-engineer`。
-5. **调用 `run_agent`**：顺序单 Agent 任务默认显式传入 `background=false`，让 MCP 服务端等待并在完成后只恢复一次 Codex 回合；只有需要并行、独立进度观察或脱离当前回合运行时才使用 `background=true`。调用时传入 `agent`、具体 `task`、当前已批准的完整 `plan`、`acceptanceCriteria`、`cwd`。模型和 effort 默认由插件配置解析，不要无故覆盖。MCP 会按所选 Runner 的能力使用原生 Agent 机制或注入专业角色提示词。
+5. **调用 `run_agent`**：顺序单 Agent 任务默认显式传入 `background=false`，让 MCP 服务端等待并在完成后只恢复一次 Codex 回合；只有需要并行、独立进度观察或脱离当前回合运行时才使用 `background=true`。调用时传入 `agent`、具体 `task`、当前已批准的完整 `plan`、`acceptanceCriteria`、`cwd`。模型、effort 和 Runner 执行超时默认由插件配置解析，不要无故覆盖。只有用户明确要求缩短执行时间时，才同时传入较小的 `timeoutMs` 与 `allowShorterTimeout=true`；等待后台结果使用 `job_wait.timeout_ms`，不得混用。
    - UI 视觉验收选择 `ui-designer`：优先用 `mcp` 或 `chrome` 检查真实渲染、目标视口、交互状态并保留截图；只有验收明确要求自动断言时才优先 `repository`。
    - 前端实现自测选择 `frontend-engineer`：涉及可运行页面且要求浏览器验证时优先 `repository`，检查受影响路径、响应式与交互行为、控制台错误和证据。
    - `qa-engineer` 负责独立冒烟、回归或 E2E：仓库已有 Playwright/Cypress 时优先 `repository`；已配置浏览器 MCP 时用 `mcp`；只有直接 Anthropic 登录且必须复用现有 Chrome 登录态时才用 `chrome`，API 网关环境不得选择该模式。
@@ -58,6 +58,7 @@ Codex 是规划者、范围控制者和最终审查者。选定的本地 CLI Run
 
 - `list_agents`：配置检查或用户询问可用智能体时使用。
 - `run_agent`：只有在 `plan` 已经具体且非空时使用。
+- `run_agent.timeoutMs`：Runner 执行超时，默认省略并沿用角色配置；较短覆盖必须得到用户明确要求并配合 `allowShorterTimeout=true`。
 - `background=false`：顺序任务的默认路径；MCP 请求保持挂起，Agent 完成后只恢复一次 Codex 回合。
 - `background=true`：只用于并行、显式进度观察或需要先返回 Job ID 的任务；创建后调用一次 `job_wait`，不要自动循环调用 `job_status`。
 - `persistOnDisconnect=true`：只有用户明确要求“Codex 停止后仍继续运行”时才允许；不得自行启用。

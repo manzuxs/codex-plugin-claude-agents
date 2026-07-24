@@ -243,7 +243,7 @@ QA_ENGINEER_BROWSER_MCP_CONFIGS_JSON={"playwright":"/absolute/path/to/playwright
 ```text
 acceptanceCriteria, context, cwd, background, persistOnDisconnect,
 leaseTimeoutMs, dryRun, resume, sessionId, model, effort,
-permissionMode, timeoutMs, maxBudgetUsd, allowedTools, disallowedTools,
+permissionMode, timeoutMs, allowShorterTimeout, maxBudgetUsd, allowedTools, disallowedTools,
 browserMode, browserMcpProfile
 ```
 
@@ -252,6 +252,8 @@ browserMode, browserMcpProfile
 ### 后台任务
 
 顺序任务默认使用 `background=false`，MCP 请求保持挂起，Agent 完成后只恢复一次 Codex 回合。需要并行或显式进度观察时使用 `background=true`；调用返回 Job ID 后，Codex 只调用一次 `job_wait`，由 MCP 服务端等待终态并返回紧凑结果。`job_status` 只读，后台 Worker 根据活动自行续租，不依赖 Codex 轮询。
+
+`timeoutMs` 是 Runner 执行超时，默认省略并沿用角色配置。单次调用只能直接延长该值；要缩短必须同时设置 `allowShorterTimeout=true`。`job_wait.timeout_ms` 仅控制等待结果的时长，不会终止 Runner。
 
 只有需要先返回 Job ID、并行运行或显式查看进度时，才使用 `background=true`。只有用户明确要求任务脱离 Codex 会话继续运行时，才使用 `persistOnDisconnect=true`。
 
