@@ -1,0 +1,20 @@
+plugins/claude-code-agents/dashboard/styles.css
+  s_bc535bf79dce50::t_602b243d2374cd 38,80-247,261,273,519
+  s_bc535bf79dce50::t_2ba834d44bab9e 523
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "f2a47dff059afd718bf8a78ea9eec22a4909e5cd",
+  "prompts": {},
+  "sessions": {
+    "s_bc535bf79dce50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f93a9-8865-7fa1-a251-ffa6ba2453b3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
