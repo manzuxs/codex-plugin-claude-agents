@@ -31,7 +31,7 @@ export function buildAgyInvocation({ pluginRoot, agent, runtime, request }) {
     browserMode: 'none',
     codexReviewRequired: request.codexReviewRequired !== false,
   })}\n\n<role_protocol>\n${specialistPrompt}\n</role_protocol>`;
-  const args = ['--print'];
+  const args = [];
   if (runtime.model) args.push('--model', runtime.model);
   if (runtime.effort && runtime.effort !== 'default') args.push('--effort', runtime.effort);
   if (runtime.permissionMode === 'plan') args.push('--mode', 'plan');
@@ -41,7 +41,7 @@ export function buildAgyInvocation({ pluginRoot, agent, runtime, request }) {
     if (request.resume === 'latest') args.push('--continue');
     else args.push('--conversation', String(request.resume));
   }
-  args.push(prompt);
+  args.push('--print', prompt);
   const env = { ...process.env, ...runtime.extraEnv };
   if (runtime.gatewayUrl) env.AGY_BASE_URL = runtime.gatewayUrl;
   if (runtime.apiKey) env.AGY_API_KEY = runtime.apiKey;

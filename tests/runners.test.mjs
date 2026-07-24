@@ -259,6 +259,7 @@ test('Grok and Antigravity invocations preserve role prompts and map native opti
   assert.ok(agy.args.includes('--print'));
   assert.ok(agy.args.includes('--mode') && agy.args.includes('plan'));
   assert.ok(agy.args.includes('--continue'));
+  assert.equal(agy.args[agy.args.indexOf('--print') + 1], agy.prompt);
   assert.ok(agy.prompt.includes('<role_protocol>'));
 });
 
