@@ -1,4 +1,4 @@
-import { createMotionSnapshot, diffDashboardMotion, mergeStreamJobMeta, meaningfulJobMetaEqual, sessionStatusFor, chartFingerprint, resourceRows, resourceFingerprint, resourceDirtyKeys, patchResourceRows, dashboardMeaningfulChange, createReconnectState, agentNodeRecords, agentNodeFingerprint, triggerMotion, removeAfterMotion, applyTopologyLinkGeometry, topologyLinkGeometry, shouldAnimateLinkTransition, statusClassFor, createModalMotionController } from './dashboard-motion.mjs';
+import { createMotionSnapshot, diffDashboardMotion, mergeStreamJobMeta, meaningfulJobMetaEqual, sessionStatusFor, chartFingerprint, resourceRows, resourceFingerprint, resourceDirtyKeys, patchResourceRows, dashboardMeaningfulChange, createReconnectState, agentNodeRecords, agentNodeFingerprint, triggerMotion, removeAfterMotion, applyTopologyLinkGeometry, topologyLinkGeometry, shouldAnimateLinkTransition, statusClassFor, createModalMotionController, createResourceHistoryState, activeJobsList, activeTopologyLinks } from './dashboard-motion.mjs';
 import { createDashboardScheduler } from './dashboard-scheduler.mjs';
 import { capabilityOptions, effortOptionsForModel, visibleConfigFields } from './dashboard-config.mjs';
 
@@ -9,7 +9,7 @@ const state = {
   streamState: 'idle', lastUpdate: null,
   reconnect: createReconnectState(),
   modelCatalogs: new Map(), modelRequestId: 0,
-  motionSnapshot: createMotionSnapshot(), chartFingerprint: '', resourceData: null, resourceFingerprint: '', resourceDimensions: {}, resourceRows: new Map(), resizeFrame: null,
+  motionSnapshot: createMotionSnapshot(), chartFingerprint: '', resourceData: null, resourceFingerprint: '', resourceDimensions: {}, resourceRows: new Map(), resourceHistory: [], resizeFrame: null,
 };
 const FALLBACK_RUNNERS = [
   { id: 'claude', name: 'Claude Code' },
@@ -176,11 +176,13 @@ const topologyLinkFor = (transition) => {
   const node = constellation?.querySelector(`[data-agent="${CSS.escape(String(transition.agentId))}"]`);
   const core = constellation?.querySelector('.core-label');
   if (!constellation || !node || !core) return null;
+  const existingTransient = constellation.querySelector(`.topology-link.transient[data-job-id="${CSS.escape(String(transition.jobId))}"]`);
+  if (existingTransient) existingTransient.remove();
   const bounds = constellation.getBoundingClientRect();
   const coreBounds = core.getBoundingClientRect();
   const nodeBounds = node.getBoundingClientRect();
   const host = document.createElement('span');
-  host.className = 'topology-link';
+  host.className = 'topology-link transient';
   host.dataset.agent = String(transition.agentId);
   host.dataset.target = String(transition.agentId);
   host.dataset.jobId = String(transition.jobId);
@@ -482,11 +484,6 @@ function renderNodes(diff, source) {
     triggerIfAllowed(motionElement(`#agent-nodes [data-agent="${CSS.escape(id)}"]`), 'motion-status-ring', motionDuration.status, source);
   });
 }
-function sparkValues(index, base) {
-  const values = []; const source = state.jobs.filter((job) => job.agent === state.agents[index % Math.max(1, state.agents.length)]?.id).length;
-  for (let i = 0; i < 18; i += 1) values.push(Math.max(0, base + ((source + index + i * 3) % 9) - 4));
-  return values;
-}
 function drawSpark(canvas, values, color) {
   const surface = clearCanvas(canvas, '#071117'); if (!surface) return; const { ctx, width, height } = surface; const max = Math.max(...values, 1); const step = width / Math.max(1, values.length - 1);
   ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.shadowColor = color; ctx.shadowBlur = 5; ctx.beginPath(); values.forEach((value, index) => { const x = index * step; const y = height - 3 - (value / max) * (height - 8); index ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke(); ctx.shadowBlur = 0;
@@ -495,15 +492,130 @@ function resourceDimensions() {
   return Object.fromEntries([...document.querySelectorAll('.resource-spark')].map((canvas) => [canvas.dataset.resourceKey, [Math.floor(canvas.getBoundingClientRect().width), Math.floor(canvas.getBoundingClientRect().height)]]));
 }
 
-function renderResources() {
+function renderTopbar() {
+  const activeAgents = state.agents.filter((agent) => {
+    const job = state.jobs.find((j) => (j.agent === agent.id || j.agentId === agent.id) && ['running', 'starting', 'queued'].includes(j.status));
+    return Boolean(job);
+  });
+  const runningJobs = state.jobs.filter((j) => ['running', 'starting'].includes(j.status));
+  const queuedJobs = state.jobs.filter((j) => j.status === 'queued');
+
+  const activeCountEl = $('#topbar-active-agents');
+  const runningCountEl = $('#topbar-running-jobs');
+  const queuedCountEl = $('#topbar-queued-jobs');
+  const summaryTextEl = $('#topbar-activity-summary');
+
+  if (activeCountEl) activeCountEl.textContent = activeAgents.length;
+  if (runningCountEl) runningCountEl.textContent = runningJobs.length;
+  if (queuedCountEl) queuedCountEl.textContent = queuedJobs.length;
+
+  if (summaryTextEl) {
+    if (runningJobs.length > 0) {
+      const firstRunning = runningJobs[0];
+      const agentName = state.agents.find((a) => a.id === firstRunning.agent)?.name || firstRunning.agent || '智能体';
+      const phase = phaseLabel(firstRunning.phase, firstRunning.status);
+      summaryTextEl.textContent = `${agentName} · ${phase}${runningJobs.length > 1 ? ` (等 ${runningJobs.length} 项并行)` : ''}`;
+    } else if (queuedJobs.length > 0) {
+      summaryTextEl.textContent = `${queuedJobs.length} 项任务排队等待资源`;
+    } else {
+      const recentJob = [...state.jobs].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0];
+      summaryTextEl.textContent = recentJob ? `最近完成: ${phaseLabel(recentJob.phase, recentJob.status)}` : '待机空闲';
+    }
+  }
+}
+
+function renderParallelLanes() {
+  const container = $('#active-lanes-list');
+  const countEl = $('#active-lanes-count');
+  if (!container) return;
+
+  const activeJobs = activeJobsList(state.jobs);
+  if (countEl) countEl.textContent = `${activeJobs.length} 活跃`;
+
+  patchKeyedList(
+    container,
+    activeJobs,
+    (job) => job.jobId,
+    (job) => {
+      const agent = state.agents.find((a) => a.id === job.agent) || { name: job.agent || '智能体' };
+      const status = statusClass(job.status);
+      const elapsed = elapsedFor(job);
+      const elapsedStr = Number.isFinite(elapsed) ? durationText(elapsed) : '实时';
+      const phaseStr = phaseLabel(job.phase, job.status);
+      const verification = job.verificationState ? ` · 验证:${job.verificationState}` : '';
+      const tool = job.lastTool ? ` · ${job.lastTool}` : '';
+
+      return `<div class="parallel-lane-row" data-job="${esc(job.jobId)}">
+        <span class="lane-status-badge ${status}">${esc(statusLabel(job.status))}</span>
+        <div class="lane-info">
+          <div class="lane-head">
+            <strong class="lane-agent">${esc(agent.name)}</strong>
+            <span class="lane-phase">${esc(phaseStr)}</span>
+          </div>
+          <p class="lane-task">${esc(job.task || '未命名任务')}${esc(verification)}${esc(tool)}</p>
+        </div>
+        <time class="lane-time">${esc(elapsedStr)}</time>
+      </div>`;
+    },
+    '<div class="empty-row">当前无并发或排队任务</div>'
+  );
+}
+
+function renderTopologyLinks() {
+  const constellation = $('#constellation');
+  if (!constellation) return;
+
+  const activeLinks = activeTopologyLinks(state.agents, state.jobs);
+  const core = constellation.querySelector('.core-label');
+  if (!core) return;
+  const bounds = constellation.getBoundingClientRect();
+  const coreBounds = core.getBoundingClientRect();
+
+  const activeLinkKeys = new Set(activeLinks.map((link) => link.jobId));
+  const existingLinks = constellation.querySelectorAll('.topology-link.persistent');
+
+  existingLinks.forEach((link) => {
+    if (!activeLinkKeys.has(link.dataset.jobId)) {
+      link.remove();
+    }
+  });
+
+  activeLinks.forEach((link) => {
+    const node = constellation.querySelector(`[data-agent="${CSS.escape(String(link.agentId))}"]`);
+    if (!node) return;
+    const nodeBounds = node.getBoundingClientRect();
+    let host = constellation.querySelector(`.topology-link.persistent[data-job-id="${CSS.escape(String(link.jobId))}"]`);
+    if (!host) {
+      host = document.createElement('span');
+      host.className = 'topology-link persistent';
+      host.dataset.agent = String(link.agentId);
+      host.dataset.target = String(link.agentId);
+      host.dataset.jobId = String(link.jobId);
+      constellation.append(host);
+    }
+    applyTopologyLinkGeometry(host, topologyLinkGeometry(
+      { x: coreBounds.left + coreBounds.width / 2, y: coreBounds.top + coreBounds.height / 2 },
+      { x: nodeBounds.left + nodeBounds.width / 2, y: nodeBounds.top + nodeBounds.height / 2 },
+      bounds
+    ));
+    host.style.setProperty('--motion-link-color', statusColor[link.status] || 'var(--cyan)');
+  });
+}
+
+function renderResources({ appendSample = false } = {}) {
   const data = { agents: state.agents, jobs: state.jobs, events: state.events };
-  const rows = resourceRows(data);
+  const previousHistory = state.resourceHistory;
+  if (appendSample) {
+    state.resourceHistory = createResourceHistoryState(previousHistory, data);
+  }
+  const currentHistory = state.resourceHistory;
+  const rows = resourceRows(data, currentHistory);
   const nextRows = new Map(rows.map((row) => [row.key, row]));
   const dimensionsBefore = state.resourceDimensions;
   const list = $('#resource-list');
   const dirtyKeys = state.resourceData === null
     ? new Set(rows.map((row) => row.key))
-    : resourceDirtyKeys(state.resourceData, data, dimensionsBefore, resourceDimensions());
+    : resourceDirtyKeys(state.resourceData, data, dimensionsBefore, resourceDimensions(), previousHistory, currentHistory);
   patchResourceRows(list, rows, dirtyKeys, {
     createRow: (row) => {
       const template = document.createElement('template');
@@ -520,7 +632,7 @@ function renderResources() {
     },
   });
   const dimensionsAfter = resourceDimensions();
-  const resizedKeys = state.resourceData === null ? [] : resourceDirtyKeys(state.resourceData, data, dimensionsBefore, dimensionsAfter);
+  const resizedKeys = state.resourceData === null ? [] : resourceDirtyKeys(state.resourceData, data, dimensionsBefore, dimensionsAfter, previousHistory, currentHistory);
   const drawKeys = new Set([...dirtyKeys, ...resizedKeys]);
   document.querySelectorAll('.resource-spark').forEach((canvas) => {
     const key = canvas.dataset.resourceKey;
@@ -530,7 +642,7 @@ function renderResources() {
   state.resourceData = { agents: [...state.agents], jobs: [...state.jobs], events: [...state.events] };
   state.resourceRows = nextRows;
   state.resourceDimensions = dimensionsAfter;
-  state.resourceFingerprint = resourceFingerprint(data, dimensionsAfter);
+  state.resourceFingerprint = resourceFingerprint(data, dimensionsAfter, currentHistory);
 }
 function renderAlerts(diff, source) {
   const alerts = [];
@@ -564,7 +676,7 @@ function renderFooter() {
 }
 function renderDashboard(snapshot, source, diff, options = {}) {
   const renderSource = options.baseline ? 'recovery' : source;
-  renderKpi(diff, renderSource); renderLoad(); renderRecent(); renderNodes(diff, renderSource); renderResources(); renderAlerts(diff, renderSource); renderPulse(); renderFooter();
+  renderTopbar(); renderKpi(diff, renderSource); renderLoad(); renderRecent(); renderNodes(diff, renderSource); renderResources({ appendSample: true }); renderParallelLanes(); renderTopologyLinks(); renderAlerts(diff, renderSource); renderPulse(); renderFooter();
   drawCharts();
   if (state.selectedJob && document.querySelector('#session-modal:not(.hidden)')) renderSession(diff, renderSource);
   if (motionAllowed(renderSource)) {

@@ -465,31 +465,101 @@ const RESOURCE_DEFINITIONS = [
   ['tokens', 'Token 记录', '#9277e8'],
 ];
 
-function resourceSparkValues(data, index, base) {
-  const agents = Array.isArray(data?.agents) ? data.agents : [];
+export function computeResourceMetrics(data = {}) {
   const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
-  const agentId = agents[index % Math.max(1, agents.length)]?.id;
-  const source = jobs.filter((job) => job?.agent === agentId).length;
-  return Array.from({ length: 18 }, (_, point) => Math.max(0, base + ((source + index + point * 3) % 9) - 4));
+  const events = Array.isArray(data?.events) ? data.events : [];
+  const running = jobs.filter((job) => ['running', 'starting'].includes(job?.status)).length;
+  const terminal = jobs.filter((job) => ['completed', 'failed', 'blocked', 'cancelled'].includes(job?.status));
+  const verified = terminal.filter((job) => job?.verificationState === 'passed' || job?.verificationState === true || Boolean(job?.verificationState)).length;
+  const tokens = jobs.reduce((sum, job) => sum + (Number(job?.inputTokens) || 0) + (Number(job?.outputTokens) || 0), 0);
+  return { concurrency: running, events: events.length, verification: verified, tokens };
 }
 
-export function resourceRows(data = {}) {
+export function createResourceHistoryState(history = [], data = {}, timestampMs = Date.now(), maxAgeMs = 60000, maxPoints = 30) {
+  const currentMetrics = computeResourceMetrics(data);
+  const cutoff = timestampMs - maxAgeMs;
+  const clean = (Array.isArray(history) ? history : []).filter((item) => item && typeof item.timestamp === 'number' && item.timestamp >= cutoff);
+  const newPoint = freeze({ timestamp: timestampMs, metrics: currentMetrics });
+  const updated = [...clean, newPoint];
+  if (updated.length > maxPoints) {
+    return freeze(updated.slice(-maxPoints));
+  }
+  return freeze(updated);
+}
+
+export function calculateSparkValuesFromHistory(history = [], key = 'concurrency', pointsCount = 18) {
+  if (!Array.isArray(history) || history.length === 0) {
+    return Array(pointsCount).fill(0);
+  }
+  const cutoff = (history.at(-1)?.timestamp || Date.now()) - 60000;
+  const validHistory = history.filter((point) => point && point.timestamp >= cutoff);
+  if (validHistory.length <= 1) {
+    return Array(pointsCount).fill(0);
+  }
+  let rawValues = [];
+  if (key === 'concurrency') {
+    rawValues = validHistory.map((point) => Math.max(0, Number(point.metrics?.[key]) || 0));
+  } else {
+    rawValues = [0];
+    for (let i = 1; i < validHistory.length; i += 1) {
+      const prev = Number(validHistory[i - 1].metrics?.[key]) || 0;
+      const curr = Number(validHistory[i].metrics?.[key]) || 0;
+      if (curr < prev) {
+        rawValues.push(0);
+      } else {
+        rawValues.push(curr - prev);
+      }
+    }
+  }
+
+  if (rawValues.length === pointsCount) return rawValues;
+  const spark = [];
+  for (let i = 0; i < pointsCount; i += 1) {
+    const idx = Math.min(rawValues.length - 1, Math.floor((i / (pointsCount - 1)) * (rawValues.length - 1)));
+    spark.push(rawValues[idx]);
+  }
+  return spark;
+}
+
+export function activeJobsList(jobs = []) {
+  return (Array.isArray(jobs) ? jobs : []).filter((job) => ['queued', 'starting', 'running'].includes(job?.status));
+}
+
+export function activeTopologyLinks(agents = [], jobs = []) {
+  const activeJobs = activeJobsList(jobs);
+  return activeJobs.map((job) => ({
+    agentId: firstValue(job?.agent, job?.agentId, job?.agent_id),
+    jobId: jobIdOf(job),
+    status: job?.status ?? 'running',
+    phase: job?.phase ?? null,
+  })).filter((link) => link.agentId !== null);
+}
+
+export function resourceRows(data = {}, history = []) {
   const agents = Array.isArray(data?.agents) ? data.agents : [];
   const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
   const events = Array.isArray(data?.events) ? data.events : [];
   const running = jobs.filter((job) => ['running', 'starting'].includes(job?.status)).length;
   const terminal = jobs.filter((job) => ['completed', 'failed', 'blocked', 'cancelled'].includes(job?.status));
-  const verified = terminal.filter((job) => job?.verificationState).length;
+  const verified = terminal.filter((job) => job?.verificationState === 'passed' || job?.verificationState === true || Boolean(job?.verificationState)).length;
+  const totalTokens = jobs.reduce((sum, job) => sum + (Number(job?.inputTokens) || 0) + (Number(job?.outputTokens) || 0), 0);
   const tokenJobs = jobs.filter((job) => Number(job?.inputTokens) || Number(job?.outputTokens)).length;
+
+  const tokenText = totalTokens > 999999
+    ? `${(totalTokens / 1000000).toFixed(2)}M`
+    : (tokenJobs ? '已记录' : '等待记录');
+
   const values = [
     [`${running}/${agents.length || 0}`, running],
     [`${events.length}`, events.length],
     [terminal.length ? `${Math.round(verified / terminal.length * 100)}%` : '—', terminal.length ? verified : 0],
-    [tokenJobs ? '已记录' : '等待记录', tokenJobs],
+    [tokenText, tokenJobs],
   ];
+
   return RESOURCE_DEFINITIONS.map(([key, label, color], index) => {
     const [value, base] = values[index];
-    return { key, label, value, base, color, sparkValues: resourceSparkValues(data, index, Number(base) || 1) };
+    const sparkValues = calculateSparkValuesFromHistory(history, key, 18);
+    return { key, label, value, base, color, sparkValues };
   });
 }
 
@@ -501,13 +571,13 @@ function resourceDimensions(dimensions = {}) {
   return Object.fromEntries(Object.keys(dimensions).sort().map((key) => [key, dimensions[key]]));
 }
 
-export function resourceFingerprint(data = {}, dimensions = {}) {
-  return stableSerialize({ rows: resourceRows(data).map(resourceInput), dimensions: resourceDimensions(dimensions) });
+export function resourceFingerprint(data = {}, dimensions = {}, history = []) {
+  return stableSerialize({ rows: resourceRows(data, history).map(resourceInput), dimensions: resourceDimensions(dimensions) });
 }
 
-export function resourceDirtyKeys(previous = {}, current = {}, previousDimensions = {}, currentDimensions = {}) {
-  const before = new Map(resourceRows(previous).map((row) => [row.key, resourceInput(row)]));
-  const after = new Map(resourceRows(current).map((row) => [row.key, resourceInput(row)]));
+export function resourceDirtyKeys(previous = {}, current = {}, previousDimensions = {}, currentDimensions = {}, previousHistory = [], currentHistory = []) {
+  const before = new Map(resourceRows(previous, previousHistory).map((row) => [row.key, resourceInput(row)]));
+  const after = new Map(resourceRows(current, currentHistory).map((row) => [row.key, resourceInput(row)]));
   const keys = new Set([...before.keys(), ...after.keys(), ...Object.keys(previousDimensions), ...Object.keys(currentDimensions)]);
   return new Set([...keys].filter((key) => stableSerialize(before.get(key)) !== stableSerialize(after.get(key))
     || stableSerialize(previousDimensions[key]) !== stableSerialize(currentDimensions[key])));

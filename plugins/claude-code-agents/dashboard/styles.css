@@ -35,7 +35,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   display: grid;
   width: 100vw;
   height: 100vh;
-  grid-template-rows: 58px 78px minmax(0, 1fr) 54px;
+  grid-template-rows: 58px 92px minmax(0, 1fr) 54px;
   overflow: hidden;
   background-color: var(--bg);
   background-image: url('/assets/command-ambient.png');
@@ -77,7 +77,174 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .brand-copy strong { display: block; font-size: 19px; line-height: 1.15; }
 .brand-copy strong span { color: #80dcfa; }
 .brand-copy small { display: block; margin-top: 4px; color: #708893; font-size: 10px; }
-.topbar-line { height: 1px; flex: 1; background: #17546a; box-shadow: 0 0 12px rgba(52, 185, 238, .4); }
+.topbar-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px 0 12px;
+  border-left: 1px solid rgba(52, 185, 238, .28);
+  overflow: hidden;
+}
+
+.topbar-metric {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 13px;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.topbar-metric + .topbar-metric::before {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 1px;
+  background: rgba(45, 96, 113, .42);
+  content: "";
+}
+
+.topbar-metric b {
+  color: #718891;
+  font-weight: normal;
+}
+
+.topbar-metric i {
+  color: var(--cyan);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar-summary-text {
+  position: relative;
+  flex: 1;
+  margin-left: 8px;
+  padding-left: 16px;
+  color: #a9bec5;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-summary-text::before {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px rgba(76, 211, 138, .7);
+  content: "";
+  transform: translateY(-50%);
+}
+
+/* Parallel Agent Lanes Styling */
+.parallel-lanes-wrap {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.parallel-lanes-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.parallel-lanes-head h3 {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.lanes-count {
+  font-size: 10px;
+  color: var(--cyan);
+}
+
+.active-lanes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.parallel-lane-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  transition: border-color var(--motion-fast) ease;
+}
+
+.parallel-lane-row:hover {
+  border-color: var(--line-bright);
+}
+
+.lane-status-badge {
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.lane-status-badge.running { background: rgba(76, 211, 138, 0.15); color: var(--green); }
+.lane-status-badge.queued { background: rgba(233, 170, 66, 0.15); color: var(--amber); }
+.lane-status-badge.failed { background: rgba(239, 92, 92, 0.15); color: var(--red); }
+.lane-status-badge.cancelled { background: rgba(127, 150, 159, 0.15); color: var(--muted); }
+
+.lane-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.lane-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.lane-agent {
+  font-size: 11px;
+  color: var(--text);
+}
+
+.lane-phase {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.lane-task {
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: #9cafb6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lane-time {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .clock { color: #9cafb6; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .health-pill { display: flex; align-items: center; gap: 7px; color: var(--green); white-space: nowrap; }
 .health-pill i, .live-badge i, .live-state i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
@@ -91,7 +258,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 1px;
-  margin: 10px 12px 8px;
+  margin: 9px 12px;
   border: 1px solid #205569;
   border-radius: var(--radius);
   overflow: hidden;
@@ -103,7 +270,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   min-width: 0;
   align-items: center;
   gap: 10px;
-  padding: 9px 10px;
+  padding: 12px 10px;
   background: rgba(6, 19, 27, .95);
 }
 .kpi-icon { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-size: 9px; font-weight: 700; box-shadow: 0 0 16px currentColor; }
@@ -349,10 +516,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 @media (max-width: 900px) {
-  html, body { min-width: 0; }.app-shell { width: 100%; height: auto; min-height: 100vh; grid-template-rows: auto auto auto auto; overflow: visible; }.topbar { min-height: 58px; flex-wrap: wrap; padding-block: 8px; }.brand-copy { min-width: 0; flex: 1; }.brand-copy strong { font-size: 16px; }.topbar-line { display: none; }.clock { order: 4; width: 100%; padding-left: 50px; }.kpi-bar { grid-template-columns: repeat(2, 1fr); }.dashboard-grid { grid-template-columns: 1fr; padding-inline: 10px; }.left-column, .right-column, .center-column { display: contents; }.constellation-panel { min-height: 590px; order: 1; }.task-state-panel { min-height: 270px; }.load-panel { min-height: 350px; }.recent-panel, .resource-panel, .success-panel, .alert-panel { min-height: 300px; }.center-bottom { grid-template-columns: 1fr; }.execution-panel, .pulse-panel { min-height: 280px; }.statusbar { grid-template-columns: repeat(2, 1fr); }.statusbar > div { border-bottom: 1px solid #173846; }.agent-node { width: min(126px, 40%); }.form-grid { grid-template-columns: 1fr; }.browser-profiles { grid-column: auto; }.task-overview { grid-template-columns: 1fr; }.task-overview dl { grid-template-columns: repeat(2, 1fr); }.session-modal { height: calc(100vh - 28px); }
+  html, body { min-width: 0; }.app-shell { width: 100%; height: auto; min-height: 100vh; grid-template-rows: auto auto auto auto; overflow: visible; }.topbar { min-height: 58px; flex-wrap: wrap; padding-block: 8px; }.brand-mark { order: 1; }.brand-copy { order: 1; min-width: 0; flex: 1 1 calc(100% - 60px); }.brand-copy strong { font-size: 16px; }.clock, .health-pill, .settings-button { order: 2; }.topbar-status-bar { width: 100%; flex: 1 1 100%; min-width: 0; order: 3; flex-wrap: wrap; padding: 8px 12px; border: 1px solid rgba(45, 96, 113, .4); border-radius: var(--radius); background: rgba(9, 24, 32, .6); }.topbar-metric { flex-shrink: 0; padding: 0; }.topbar-metric + .topbar-metric::before { display: none; }.topbar-summary-text { flex: 1 1 auto; min-width: 0; margin-left: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.clock { width: auto; padding-left: 0; }.kpi-bar { grid-template-columns: repeat(2, 1fr); }.dashboard-grid { grid-template-columns: 1fr; padding-inline: 10px; }.left-column, .right-column, .center-column { display: contents; }.constellation-panel { min-height: 590px; order: 1; }.task-state-panel { min-height: 270px; }.load-panel { min-height: 350px; }.recent-panel, .resource-panel, .success-panel, .alert-panel { min-height: 300px; }.center-bottom { grid-template-columns: 1fr; }.execution-panel, .pulse-panel { min-height: 280px; }.statusbar { grid-template-columns: repeat(2, 1fr); }.statusbar > div { border-bottom: 1px solid #173846; }.agent-node { width: min(126px, 40%); }.form-grid { grid-template-columns: 1fr; }.browser-profiles { grid-column: auto; }.task-overview { grid-template-columns: 1fr; }.task-overview dl { grid-template-columns: repeat(2, 1fr); }.session-modal { height: calc(100vh - 28px); }
 }
 
 @media (max-width: 480px) {
+  .topbar-summary-text { flex-basis: 100%; width: 100%; }
   .agent-node[data-agent="security-engineer"] { left: clamp(22%, 22%, 24%) !important; }
   .agent-node[data-agent="devops-engineer"], .agent-node[data-agent="qa-engineer"] { left: clamp(26%, 26%, 30%) !important; }
   .agent-node[data-agent="backend-engineer"], .agent-node[data-agent="ui-designer"] { left: clamp(70%, 74%, 80%) !important; }

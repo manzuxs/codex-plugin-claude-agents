@@ -17,7 +17,12 @@
         <strong>Multi-CLI <span>智慧指挥大屏</span></strong>
         <small>本地多智能体研发协同与自动化执行平台</small>
       </div>
-      <div class="topbar-line" aria-hidden="true"></div>
+      <div class="topbar-status-bar" id="topbar-status-summary">
+        <span class="topbar-metric"><b>活跃智能体</b> <i id="topbar-active-agents">0</i></span>
+        <span class="topbar-metric"><b>并发</b> <i id="topbar-running-jobs">0</i></span>
+        <span class="topbar-metric"><b>排队</b> <i id="topbar-queued-jobs">0</i></span>
+        <span class="topbar-summary-text" id="topbar-activity-summary">等待任务</span>
+      </div>
       <div class="clock" id="clock">—</div>
       <div class="health-pill" id="connection-state"><i></i><span>正在连接</span></div>
       <button class="settings-button" id="settings-open" type="button">设置</button>
@@ -116,9 +121,16 @@
       <aside class="right-column">
         <section class="panel resource-panel">
           <header class="panel-head">
-            <h2>执行资源监控</h2><span>实时采样</span>
+            <h2>执行资源监控</h2><span>60 秒真实趋势</span>
           </header>
           <div class="resource-list" id="resource-list"></div>
+          <div class="parallel-lanes-wrap">
+            <div class="parallel-lanes-head">
+              <h3>活跃智能体泳道</h3>
+              <span class="lanes-count" id="active-lanes-count">0 活跃</span>
+            </div>
+            <div class="active-lanes-list" id="active-lanes-list"></div>
+          </div>
         </section>
 
         <section class="panel success-panel">

@@ -26,6 +26,11 @@ import {
   prefersReducedMotion,
   statusClassFor,
   createModalMotionController,
+  createResourceHistoryState,
+  computeResourceMetrics,
+  calculateSparkValuesFromHistory,
+  activeJobsList,
+  activeTopologyLinks,
 } from '../plugins/claude-code-agents/dashboard/dashboard-motion.mjs';
 
 import { createDashboardScheduler, isDocumentHidden } from '../plugins/claude-code-agents/dashboard/dashboard-scheduler.mjs';
@@ -468,6 +473,14 @@ test('defines the semantic CSS motion contract', () => {
 
   const mobileAgentRule = atRuleBody(styles, '@media (max-width: 900px)');
   assert.match(mobileAgentRule, /\.agent-node\s*\{[^}]*width:\s*min\(126px,\s*40%\)/s);
+  assert.match(mobileAgentRule, /\.brand-copy\s*\{[^}]*order:\s*1/);
+  assert.match(mobileAgentRule, /\.brand-copy\s*\{[^}]*flex:\s*1\s+1\s+calc\(100%\s*-\s*60px\)/);
+  assert.match(mobileAgentRule, /\.clock,\s*\.health-pill,\s*\.settings-button\s*\{[^}]*order:\s*2/);
+  assert.match(mobileAgentRule, /\.topbar-status-bar\s*\{[^}]*order:\s*3/);
+  assert.match(mobileAgentRule, /\.topbar-status-bar\s*\{[^}]*width:\s*100%/);
+  assert.match(mobileAgentRule, /\.topbar-metric\s*\{[^}]*flex-shrink:\s*0/);
+  assert.match(mobileAgentRule, /\.topbar-summary-text\s*\{[^}]*overflow:\s*hidden/);
+  assert.doesNotMatch(mobileAgentRule, /\.topbar-line/);
   const mobileEdgeRule = atRuleBody(styles, '@media (max-width: 480px)');
   assert.match(mobileEdgeRule, /\.agent-node\[data-agent="security-engineer"\]\s*\{[^}]*left:\s*clamp\(22%/s);
   assert.match(mobileEdgeRule, /\.agent-node\[data-agent="frontend-engineer"\]\s*\{[^}]*left:\s*clamp\(76%/s);
@@ -1059,4 +1072,175 @@ test('uses injected document visibility and cancels a pending frame', () => {
   scheduler.cancel();
   assert.deepEqual(cancelled, [42]);
   assert.equal(frames.length, 1);
+});
+
+test('extracts active jobs for parallel lanes preserving all queued, starting, and running tasks', () => {
+  const jobs = [
+    { jobId: 'job-1', agent: 'backend-engineer', status: 'running', phase: 'implementing', task: 'Task 1' },
+    { jobId: 'job-2', agent: 'frontend-engineer', status: 'running', phase: 'verifying', task: 'Task 2' },
+    { jobId: 'job-3', agent: 'qa-engineer', status: 'queued', phase: null, task: 'Task 3' },
+    { jobId: 'job-4', agent: 'devops-engineer', status: 'completed', phase: 'completed', task: 'Task 4' },
+  ];
+  const active = activeJobsList(jobs);
+  assert.equal(active.length, 3);
+  assert.deepEqual(active.map((j) => j.jobId), ['job-1', 'job-2', 'job-3']);
+  const links = activeTopologyLinks([{ id: 'backend-engineer' }, { id: 'frontend-engineer' }], jobs);
+  assert.equal(links.length, 3);
+});
+
+test('tracks bounded 60-second snapshot history and generates real trend sparklines without mutating inputs', () => {
+  const baseTime = 100000;
+  const snapshotData1 = {
+    agents: [{ id: 'a' }],
+    jobs: [{ jobId: 'j1', agent: 'a', status: 'running', inputTokens: 100, outputTokens: 50 }],
+    events: [{ seq: 1 }],
+  };
+  const inputBefore = structuredClone(snapshotData1);
+
+  let history = createResourceHistoryState([], snapshotData1, baseTime);
+  assert.equal(history.length, 1);
+  assert.deepEqual(snapshotData1, inputBefore);
+
+  const snapshotData2 = {
+    agents: [{ id: 'a' }],
+    jobs: [
+      { jobId: 'j1', agent: 'a', status: 'running', inputTokens: 200, outputTokens: 100 },
+      { jobId: 'j2', agent: 'a', status: 'queued', inputTokens: 0, outputTokens: 0 },
+    ],
+    events: [{ seq: 1 }, { seq: 2 }, { seq: 3 }],
+  };
+
+  history = createResourceHistoryState(history, snapshotData2, baseTime + 10000);
+  assert.equal(history.length, 2);
+
+  const sparkConcurrency = calculateSparkValuesFromHistory(history, 'concurrency', 18);
+  const sparkEvents = calculateSparkValuesFromHistory(history, 'events', 18);
+  const sparkTokens = calculateSparkValuesFromHistory(history, 'tokens', 18);
+
+  assert.equal(sparkConcurrency.length, 18);
+  assert.equal(sparkEvents.length, 18);
+  assert.equal(sparkTokens.length, 18);
+
+  // Exceed 60 seconds (61000ms) cutoff
+  history = createResourceHistoryState(history, snapshotData2, baseTime + 71000);
+  assert.equal(history.every((point) => point.timestamp >= baseTime + 11000), true);
+  assert.equal(history.some((point) => point.timestamp === baseTime), false);
+});
+
+test('returns zero flatlines when history is empty or flat without fake wave formulas', () => {
+  const spark = calculateSparkValuesFromHistory([], 'concurrency', 18);
+  assert.deepEqual(spark, Array(18).fill(0));
+
+  const flatHistory = [
+    { timestamp: 1000, metrics: { concurrency: 1, events: 5, verification: 0, tokens: 100 } },
+    { timestamp: 2000, metrics: { concurrency: 1, events: 5, verification: 0, tokens: 100 } },
+  ];
+  const sparkFlat = calculateSparkValuesFromHistory(flatHistory, 'events', 18);
+  assert.deepEqual(sparkFlat, Array(18).fill(0));
+});
+
+test('resourceFingerprint produces stable fingerprint for identical history and dimensions', () => {
+  const data = { agents: [{ id: 'a' }], jobs: [{ jobId: 'j1', agent: 'a', status: 'running' }], events: [] };
+  const history = createResourceHistoryState([], data, 10000);
+  const dims = { concurrency: [100, 20], events: [100, 20] };
+  const fp1 = resourceFingerprint(data, dims, history);
+  const fp2 = resourceFingerprint(data, dims, history);
+  assert.equal(fp1, fp2);
+});
+
+test('tracks bounded 60-second snapshot history and maxPoints limit for high-frequency sampling', () => {
+  const baseTime = 100000;
+  const data = {
+    agents: [{ id: 'a' }],
+    jobs: [{ jobId: 'j1', agent: 'a', status: 'running', inputTokens: 100, outputTokens: 50 }],
+    events: [{ seq: 1 }],
+  };
+  let history = [];
+  for (let i = 0; i < 1000; i += 1) {
+    history = createResourceHistoryState(history, data, baseTime + i * 10, 60000, 30);
+  }
+  assert.equal(history.length, 30);
+  assert.equal(Object.isFrozen(history), true);
+  assert.equal(Object.isFrozen(history[0]), true);
+});
+
+test('calculates concurrency as actual snapshot levels and cumulative metrics as adjacent snapshot deltas', () => {
+  const baseTime = 100000;
+  const p1 = { agents: [{ id: 'a' }, { id: 'b' }], jobs: [{ jobId: 'j1', agent: 'a', status: 'running', inputTokens: 100, outputTokens: 0 }], events: [{ seq: 1 }] };
+  const p2 = { agents: [{ id: 'a' }, { id: 'b' }], jobs: [{ jobId: 'j1', agent: 'a', status: 'running', inputTokens: 150, outputTokens: 50 }, { jobId: 'j2', agent: 'b', status: 'running', inputTokens: 100, outputTokens: 100 }], events: [{ seq: 1 }, { seq: 2 }, { seq: 3 }] };
+  const p3 = { agents: [{ id: 'a' }, { id: 'b' }], jobs: [{ jobId: 'j1', agent: 'a', status: 'running', inputTokens: 200, outputTokens: 100 }], events: [{ seq: 1 }, { seq: 2 }, { seq: 3 }, { seq: 4 }] };
+
+  let history = createResourceHistoryState([], p1, baseTime);
+  history = createResourceHistoryState(history, p2, baseTime + 10000);
+  history = createResourceHistoryState(history, p3, baseTime + 20000);
+
+  // Concurrency actual levels: p1=1, p2=2, p3=1. Flat resampled across 18 points starts at 1, reaches 2, ends at 1.
+  const concurrencySparks = calculateSparkValuesFromHistory(history, 'concurrency', 18);
+  assert.equal(concurrencySparks.length, 18);
+  assert.equal(concurrencySparks[0], 1);
+  assert.equal(concurrencySparks[Math.floor(18 / 2)], 2);
+  assert.equal(concurrencySparks[17], 1);
+
+  // Events adjacent deltas: p1=1 (init 0), p2=3 (delta 3-1=2), p3=4 (delta 4-3=1).
+  const eventsSparks = calculateSparkValuesFromHistory(history, 'events', 18);
+  assert.equal(eventsSparks[0], 0);
+  assert.equal(eventsSparks[Math.floor(18 / 2)], 2);
+  assert.equal(eventsSparks[17], 1);
+
+  // Tokens adjacent deltas: p1=100 (init 0), p2=400 (delta 300), p3=300 (reset! delta 0).
+  const tokensSparks = calculateSparkValuesFromHistory(history, 'tokens', 18);
+  assert.equal(tokensSparks[0], 0);
+  assert.equal(tokensSparks[Math.floor(18 / 2)], 300);
+  assert.equal(tokensSparks[17], 0);
+});
+
+test('handles counter resets without producing negative deltas or false spikes', () => {
+  const p1 = { agents: [], jobs: [], events: Array(100).fill({}) };
+  const p2 = { agents: [], jobs: [], events: Array(30).fill({}) }; // Counter reset
+  let history = createResourceHistoryState([], p1, 1000);
+  history = createResourceHistoryState(history, p2, 2000);
+
+  const spark = calculateSparkValuesFromHistory(history, 'events', 18);
+  assert.equal(spark.every((v) => v >= 0), true);
+  assert.equal(spark[17], 0); // counter reset produces zero delta
+});
+
+test('returns flat zero lines for empty history or single snapshot', () => {
+  const emptySpark = calculateSparkValuesFromHistory([], 'concurrency', 18);
+  assert.deepEqual(emptySpark, Array(18).fill(0));
+
+  const singleData = { agents: [{ id: 'a' }], jobs: [{ jobId: 'j1', agent: 'a', status: 'running' }], events: [{ seq: 1 }] };
+  const singleHistory = createResourceHistoryState([], singleData, 1000);
+  const singleSpark = calculateSparkValuesFromHistory(singleHistory, 'concurrency', 18);
+  assert.deepEqual(singleSpark, Array(18).fill(0));
+});
+
+test('resourceDirtyKeys detects changes when previous and current histories differ', () => {
+  const data = { agents: [{ id: 'a' }], jobs: [{ jobId: 'j1', agent: 'a', status: 'running' }], events: [{ seq: 1 }] };
+  const dims = { concurrency: [100, 20], events: [100, 20], verification: [100, 20], tokens: [100, 20] };
+  const h1 = createResourceHistoryState([], data, 1000);
+  const h2 = createResourceHistoryState(h1, { ...data, jobs: [{ jobId: 'j1', agent: 'a', status: 'running', inputTokens: 50, outputTokens: 50 }] }, 2000);
+
+  const dirtyKeys = resourceDirtyKeys(data, data, dims, dims, h1, h2);
+  assert.equal(dirtyKeys.has('tokens'), true);
+});
+
+test('activeTopologyLinks handles multiple active agents and queued jobs', () => {
+  const agents = [{ id: 'a1' }, { id: 'a2' }];
+  const jobs = [
+    { jobId: 'j1', agent: 'a1', status: 'running', phase: 'implementing' },
+    { jobId: 'j2', agent: 'a2', status: 'queued', phase: null },
+    { jobId: 'j3', agent: 'a1', status: 'completed', phase: 'completed' },
+  ];
+  const links = activeTopologyLinks(agents, jobs);
+  assert.equal(links.length, 2);
+  assert.deepEqual(links.map((l) => l.jobId), ['j1', 'j2']);
+});
+
+test('app.js contracts: topology links have clear separation of transient cleanup and persistent management', () => {
+  assert.match(dashboardApp, /host\.className = 'topology-link transient'/);
+  assert.match(dashboardApp, /host\.className = 'topology-link persistent'/);
+  assert.match(dashboardApp, /querySelectorAll\('\.topology-link\.persistent'\)/);
+  assert.match(dashboardApp, /onCleanup:\s*\(\)\s*=>\s*link\.remove\(\)/);
+  assert.match(dashboardApp, /renderResources\(\{ appendSample: true \}\)/);
 });
