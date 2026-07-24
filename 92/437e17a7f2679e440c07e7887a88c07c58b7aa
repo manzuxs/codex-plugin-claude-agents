@@ -1,0 +1,61 @@
+plugins/claude-code-agents/server/lib/runners/model-discovery.mjs
+  s_29cbca186958e5::t_78097caf1df4b9 87,92-94,148-149,163
+tests/model-discovery.test.mjs
+  s_29cbca186958e5::t_3432138ee914eb 3-5,7,64-92,94-100
+  s_29cbca186958e5::t_78097caf1df4b9 106
+  s_29cbca186958e5::t_1dd4ae4a646250 93
+  s_29cbca186958e5::t_d4692e7aed1e0c 101
+plugins/claude-code-agents/dashboard/app.js
+  s_29cbca186958e5::t_9f3eff5730e944 619-623,678-684,692,849-853
+  s_29cbca186958e5::t_92485032fe8f0b 726,848,854-856
+  s_29cbca186958e5::t_889b7bf2ffe35b 618,671,675-677
+plugins/claude-code-agents/server/lib/runners/capabilities.mjs
+  s_29cbca186958e5::t_78097caf1df4b9 34,37
+tests/mcp.test.mjs
+  s_29cbca186958e5::t_3432138ee914eb 193
+  s_29cbca186958e5::t_889b7bf2ffe35b 143,155,179-183,195
+  s_29cbca186958e5::t_9f3eff5730e944 184-192,194,196
+  s_29cbca186958e5::t_78097caf1df4b9 46
+plugins/claude-code-agents/server/lib/runners/codex.mjs
+  s_29cbca186958e5::t_3010a43b028dad 93-97
+  s_29cbca186958e5::t_78097caf1df4b9 40,45-47
+plugins/claude-code-agents/dashboard/styles.css
+  s_29cbca186958e5::t_889b7bf2ffe35b 202
+plugins/claude-code-agents/server/lib/agents.mjs
+  s_29cbca186958e5::t_889b7bf2ffe35b 113-121
+plugins/claude-code-agents/server/lib/service.mjs
+  s_29cbca186958e5::t_9f3eff5730e944 369,374-375,380-381
+  s_29cbca186958e5::t_889b7bf2ffe35b 372-373,376
+plugins/claude-code-agents/server/dashboard.mjs
+  s_29cbca186958e5::t_3432138ee914eb 177-179
+  s_29cbca186958e5::t_9f3eff5730e944 176,180-185,191,193
+  s_29cbca186958e5::t_889b7bf2ffe35b 186-190
+plugins/claude-code-agents/dashboard/index.html
+  s_29cbca186958e5::t_889b7bf2ffe35b 171-172
+  s_29cbca186958e5::t_9f3eff5730e944 173-178,192,198,203
+  s_29cbca186958e5::t_69cf2bf6d89c37 179-181,189-191
+  s_29cbca186958e5::t_41d8a46402f357 193-197
+  s_29cbca186958e5::t_2e1ccded7ecb6b 199-202
+  s_29cbca186958e5::t_c929deea1417cc 204-206
+tests/agents.test.mjs
+  s_29cbca186958e5::t_889b7bf2ffe35b 33-44
+tests/runners.test.mjs
+  s_29cbca186958e5::t_586d40e067eba4 7,70-81
+  s_29cbca186958e5::t_78097caf1df4b9 60-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "92437e17a7f2679e440c07e7887a88c07c58b7aa",
+  "prompts": {},
+  "sessions": {
+    "s_29cbca186958e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f92d2-eaea-73c0-985f-8ca8878ec4d9",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
