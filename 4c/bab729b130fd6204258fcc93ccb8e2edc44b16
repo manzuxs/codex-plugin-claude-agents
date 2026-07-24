@@ -1,0 +1,55 @@
+plugins/claude-code-agents/skills/claude-orchestrator/SKILL.md
+  s_a1388a2ea351ea::t_d7fa3168fd11a4 2-3,12,23,47,55,152,154
+plugins/claude-code-agents/dashboard/app.js
+  s_a1388a2ea351ea::t_03e5c844be8a46 580,582
+  s_a1388a2ea351ea::t_eca0076f384205 23-29,577,705,709-710
+  s_29cbca186958e5::t_92dba7254115e0 306-316,636
+tests/runners.test.mjs
+  s_29cbca186958e5::t_e22b000c05b81e 38-40
+  s_29cbca186958e5::t_458b5e31e6f8fb 188,192,201
+  s_29cbca186958e5::t_92dba7254115e0 233-238
+plugins/claude-code-agents/server/lib/runners/codex.mjs
+  s_29cbca186958e5::t_e22b000c05b81e 21,35,106
+plugins/claude-code-agents/skills/claude-orchestrator/agents/openai.yaml
+  s_a1388a2ea351ea::t_d7fa3168fd11a4 2-3,5,11-12
+plugins/claude-code-agents/server/dashboard.mjs
+  s_a1388a2ea351ea::t_e8d6ff341f3908 160-162
+  s_a1388a2ea351ea::t_ebb23564255900 3,15-42,87,90-92
+plugins/claude-code-agents/skills/claude-agent-admin/agents/openai.yaml
+  s_a1388a2ea351ea::t_d7fa3168fd11a4 11-12
+plugins/claude-code-agents/server/lib/runners/grok.mjs
+  s_29cbca186958e5::t_50b82324034b4b 80
+  s_29cbca186958e5::t_92dba7254115e0 81,84,89
+  s_29cbca186958e5::t_458b5e31e6f8fb 27,41,110
+plugins/claude-code-agents/skills/claude-agent-admin/SKILL.md
+  s_a1388a2ea351ea::t_d7fa3168fd11a4 2
+tests/mcp.test.mjs
+  s_a1388a2ea351ea::t_ebb23564255900 8,26-39
+  s_a1388a2ea351ea::t_d7fa3168fd11a4 16-25,40-41
+  s_a1388a2ea351ea::t_ba5c50af75fd44 133,146,192-199
+  s_a1388a2ea351ea::t_e205f51fd6be30 200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4cbab729b130fd6204258fcc93ccb8e2edc44b16",
+  "prompts": {},
+  "sessions": {
+    "s_29cbca186958e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f92d2-eaea-73c0-985f-8ca8878ec4d9",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    },
+    "s_a1388a2ea351ea": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8d35-48d4-7772-8013-45093a6ffc14",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
