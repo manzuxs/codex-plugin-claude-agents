@@ -458,9 +458,9 @@ function renderKpi(diff, source) {
   });
 }
 function renderLoad() {
-  const usage = state.agents.map((agent) => ({ agent, count: jobsFor(agent.id).length })).sort((a, b) => b.count - a.count || a.agent.name.localeCompare(b.agent.name, 'zh-CN'));
+  const usage = state.agents.map((agent) => ({ agent, count: jobsFor(agent.id).length })).sort((a, b) => b.count - a.count || a.agent.name.localeCompare(b.agent.name, 'zh-CN')).map((item, index) => ({ ...item, rank: index + 1 }));
   const max = Math.max(1, ...usage.map((item) => item.count));
-  patchKeyedList($('#agent-load-list'), usage, ({ agent }) => agent.id, ({ agent, count }, index) => `<div class="load-row"><span class="load-rank">${index + 1}</span><span class="load-name">${esc(agent.name)}</span><span class="load-track"><i style="width:${Math.round(count / max * 100)}%"></i></span><span class="load-value">${count}</span></div>`, '<div class="empty-row">暂无智能体数据</div>');
+  patchKeyedList($('#agent-load-list'), usage, ({ agent }) => agent.id, ({ agent, count, rank }) => `<div class="load-row"><span class="load-rank">${rank}</span><span class="load-name">${esc(agent.name)}</span><span class="load-track"><i style="width:${Math.round(count / max * 100)}%"></i></span><span class="load-value">${count}</span></div>`, '<div class="empty-row">暂无智能体数据</div>');
 }
 function renderRecent() {
   const jobs = [...state.jobs].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 8);
