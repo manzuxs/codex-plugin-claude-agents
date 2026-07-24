@@ -110,14 +110,15 @@ export function resolveAgentRuntime({ agent, env, overrides = {}, runner }) {
   );
   const timeoutMs = overrides.timeoutMs ?? envInteger(env, `${roleRunnerPrefix}_TIMEOUT_MS`, envInteger(env, `${runnerPrefix}_DEFAULT_TIMEOUT_MS`, envInteger(env, `${p}_TIMEOUT_MS`, envInteger(env, 'CLAUDE_DEFAULT_TIMEOUT_MS', 1_800_000))));
   const maxBudgetUsd = overrides.maxBudgetUsd ?? envNumber(env, `${roleRunnerPrefix}_MAX_BUDGET_USD`, envNumber(env, `${runnerPrefix}_DEFAULT_MAX_BUDGET_USD`, envNumber(env, `${p}_MAX_BUDGET_USD`, envNumber(env, 'CLAUDE_DEFAULT_MAX_BUDGET_USD', 0))));
-  const gatewayUrl = String(firstNonEmpty(
-    overrides.gatewayUrl,
-    env[`${roleRunnerPrefix}_GATEWAY_URL`],
-    env[`${runnerPrefix}_DEFAULT_GATEWAY_URL`],
-    runnerId === 'claude' ? env[`${p}_GATEWAY_URL`] : undefined,
-    runnerId === 'claude' ? env.CLAUDE_DEFAULT_GATEWAY_URL : undefined,
-    '',
-  ) ?? '');
+  const gatewayUrl = Object.prototype.hasOwnProperty.call(overrides, 'gatewayUrl')
+    ? String(overrides.gatewayUrl ?? '')
+    : String(firstNonEmpty(
+      env[`${roleRunnerPrefix}_GATEWAY_URL`],
+      env[`${runnerPrefix}_DEFAULT_GATEWAY_URL`],
+      runnerId === 'claude' ? env[`${p}_GATEWAY_URL`] : undefined,
+      runnerId === 'claude' ? env.CLAUDE_DEFAULT_GATEWAY_URL : undefined,
+      '',
+    ) ?? '');
   const apiKey = String(firstNonEmpty(
     overrides.apiKey,
     env[`${roleRunnerPrefix}_API_KEY`],

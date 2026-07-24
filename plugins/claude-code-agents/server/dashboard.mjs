@@ -173,12 +173,24 @@ export async function startDashboard({ service, pluginRoot, port = 0, open = fal
           installation: await readInstallation(),
         });
       }
-      if (req.method === 'GET' && url.pathname === '/api/models') {
-        const cwd = url.searchParams.get('cwd') || repoRoot;
-        const runner = url.searchParams.get('runner') || undefined;
-        const agent = url.searchParams.get('agent') || undefined;
+      if ((req.method === 'GET' || req.method === 'POST') && url.pathname === '/api/models') {
+        const receivedBody = req.method === 'POST' ? await readBody(req) : {};
+        if (!receivedBody || typeof receivedBody !== 'object' || Array.isArray(receivedBody)) throw new Error('Model discovery body must be a JSON object.');
+        const body = receivedBody;
+        const cwd = body.cwd || url.searchParams.get('cwd') || repoRoot;
+        const runner = body.runner || url.searchParams.get('runner') || undefined;
+        const agent = body.agent || url.searchParams.get('agent') || undefined;
+        const gatewayUrl = req.method === 'POST' ? (Object.hasOwn(body, 'gatewayUrl') ? body.gatewayUrl : undefined) : (url.searchParams.has('gateway') ? url.searchParams.get('gateway') : undefined);
+        const apiKey = req.method === 'POST' ? body.apiKey : undefined;
+        const apiKeyKind = req.method === 'POST' ? body.apiKeyKind : undefined;
+        if (gatewayUrl) {
+          let parsed;
+          try { parsed = new URL(gatewayUrl); } catch { throw new Error('gatewayUrl must be a valid http(s) URL.'); }
+          if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('gatewayUrl must be a valid http(s) URL.');
+        }
+        if (apiKeyKind !== undefined && !['auth_token', 'api_key'].includes(String(apiKeyKind))) throw new Error('apiKeyKind must be auth_token or api_key.');
         const models = service.listModels
-          ? await service.listModels({ runner, agent, cwd })
+          ? await service.listModels({ runner, agent, cwd, gatewayUrl, apiKey, apiKeyKind })
           : { runner, models: [], source: 'unavailable', authoritative: false };
         return json(res, 200, models);
       }

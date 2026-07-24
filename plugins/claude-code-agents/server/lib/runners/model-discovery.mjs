@@ -84,12 +84,14 @@ export function parseCodexModels(result) {
   ));
 }
 
-function discoverCodexModels(command, { cwd, env, timeoutMs = 8000 } = {}) {
+function discoverCodexModels(command, { cwd, env, gatewayUrl, timeoutMs = 8000 } = {}) {
   return new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
     let settled = false;
-    const child = spawn(command, ['app-server', '--stdio'], { cwd, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
+    const args = ['app-server', '--stdio'];
+    if (gatewayUrl) args.push('--config', `openai_base_url=${JSON.stringify(gatewayUrl)}`);
+    const child = spawn(command, args, { cwd, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
     const finish = (error, result) => {
       if (settled) return;
       settled = true;
@@ -143,6 +145,8 @@ function discoveryEnv(runnerId, runtime) {
   if (runnerId === 'claude') {
     if (runtime.gatewayUrl) env.ANTHROPIC_BASE_URL = runtime.gatewayUrl;
     if (runtime.apiKey) env[runtime.apiKeyKind === 'api_key' ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN'] = runtime.apiKey;
+  } else if (runnerId === 'codex') {
+    if (runtime.apiKey) env.CODEX_API_KEY = runtime.apiKey;
   } else if (runnerId === 'grok') {
     if (runtime.gatewayUrl) env.XAI_API_BASE_URL = runtime.gatewayUrl;
     if (runtime.apiKey) env.XAI_API_KEY = runtime.apiKey;
@@ -156,7 +160,7 @@ function discoveryEnv(runnerId, runtime) {
 export async function discoverRunnerModels(runnerId, runtime, { cwd, timeoutMs = 8000 } = {}) {
   const env = discoveryEnv(runnerId, runtime);
   if (runnerId === 'codex') {
-    return { models: await discoverCodexModels(runtime.codexBin, { cwd, env, timeoutMs }), source: 'codex-app-server', authoritative: true };
+    return { models: await discoverCodexModels(runtime.codexBin, { cwd, env, gatewayUrl: runtime.gatewayUrl, timeoutMs }), source: 'codex-app-server', authoritative: true };
   }
   if (runnerId === 'grok') {
     const result = await runCommand(runtime.grokBin, ['models'], { cwd, env, timeoutMs });

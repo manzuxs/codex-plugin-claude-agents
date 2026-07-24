@@ -31,9 +31,10 @@ export const RUNNER_CAPABILITIES = Object.freeze({
       sessionId: false,
       browser: ['none'],
       outputFormat: ['json', 'stream-json'],
-      configFields: ['model', 'effort', 'permissionMode', 'timeoutMs'],
+      configFields: ['model', 'effort', 'permissionMode', 'timeoutMs', 'gatewayUrl', 'apiKey'],
       defaultEffort: 'default',
       defaultOutputFormat: 'stream-json',
+      defaultApiKeyKind: 'api_key',
     }),
   }),
   grok: Object.freeze({

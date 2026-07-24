@@ -30,6 +30,18 @@ test('runtime uses agent-specific settings over defaults', () => {
   assert.equal(runtime.permissionMode, 'auto');
 });
 
+test('runtime allows an explicit empty gateway override for model discovery', () => {
+  const registry = loadAgentRegistry(root);
+  const agent = resolveAgent(registry, 'backend-engineer');
+  const runtime = resolveAgentRuntime({
+    agent,
+    runner: 'codex',
+    env: { BACKEND_ENGINEER_CODEX_GATEWAY_URL: 'https://stored-gateway.example/v1' },
+    overrides: { gatewayUrl: '' },
+  });
+  assert.equal(runtime.gatewayUrl, '');
+});
+
 
 test('runtime rejects flags absent from the supplied Claude CLI help', () => {
   const registry = loadAgentRegistry(root);

@@ -366,14 +366,19 @@ export class ClaudeAgentService {
     return listRunners(this.runners, defaultRunner);
   }
 
-  async listModels({ runner, agent, cwd = process.cwd() } = {}) {
+  async listModels({ runner, agent, cwd = process.cwd(), gatewayUrl, apiKey, apiKeyKind } = {}) {
     const resolvedCwd = assertWorkingDirectory(cwd);
     const resolvedAgent = resolveAgent(this.registry, agent || this.registry.agents[0].id);
-    const runtime = this.runtimeFor(resolvedAgent, resolvedCwd, { runner });
+    const runtimeOverrides = { runner };
+    if (gatewayUrl !== undefined) runtimeOverrides.gatewayUrl = gatewayUrl;
+    if (apiKey !== undefined && apiKey !== '') runtimeOverrides.apiKey = apiKey;
+    if (apiKeyKind !== undefined && apiKeyKind !== '') runtimeOverrides.apiKeyKind = apiKeyKind;
+    const runtime = this.runtimeFor(resolvedAgent, resolvedCwd, runtimeOverrides);
     const runnerId = runner || runtime.runner;
     resolveRunner(this.runners, runnerId);
     const command = runtime[`${runnerId}Bin`] || runnerId;
-    const cacheKey = [runnerId, command, runtime.gatewayUrl, Boolean(runtime.apiKey)].join(':');
+    const credentialHash = runtime.apiKey ? crypto.createHash('sha256').update(runtime.apiKey).digest('hex') : '';
+    const cacheKey = [runnerId, command, runtime.gatewayUrl, runtime.apiKeyKind, credentialHash].join(':');
     const cached = this.modelCache.get(cacheKey);
     if (cached && Date.now() - cached.checkedAt < 60_000) return cached.value;
     try {

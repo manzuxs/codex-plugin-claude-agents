@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildCodexInvocation, parseCodexOutput } from '../plugins/claude-code-agents/server/lib/runners/codex.mjs';
+import { buildCodexInvocation, codexRunner, parseCodexOutput } from '../plugins/claude-code-agents/server/lib/runners/codex.mjs';
 import { buildGrokInvocation, createGrokProgressReporter, parseGrokOutput } from '../plugins/claude-code-agents/server/lib/runners/grok.mjs';
 import { buildAgyInvocation } from '../plugins/claude-code-agents/server/lib/runners/agy.mjs';
 import { loadAgentRegistry, resolveAgent, resolveAgentRuntime } from '../plugins/claude-code-agents/server/lib/agents.mjs';
@@ -57,6 +57,28 @@ test('Codex invocation uses only supported safe argv for each permission intent'
   const deepReasoning = buildCodexInvocation({ pluginRoot, agent, runtime: codexRuntime({ effort: 'xhigh' }), request: request() });
   const configIndex = deepReasoning.args.indexOf('--config');
   assert.equal(deepReasoning.args[configIndex + 1], 'model_reasoning_effort="xhigh"');
+
+  const gateway = buildCodexInvocation({
+    pluginRoot,
+    agent,
+    runtime: codexRuntime({ gatewayUrl: 'http://localhost:8080/v1', apiKey: 'secret-key' }),
+    request: request(),
+  });
+  assert.ok(gateway.args.includes('openai_base_url="http://localhost:8080/v1"'));
+  assert.equal(gateway.args.includes('secret-key'), false);
+  assert.equal(gateway.env.CODEX_API_KEY, 'secret-key');
+});
+
+test('Codex dry-run redacts the configured gateway address', async () => {
+  const result = await codexRunner.run({
+    pluginRoot,
+    agent,
+    runtime: codexRuntime({ gatewayUrl: 'https://private-gateway.example/v1' }),
+    request: request({ dryRun: true }),
+    cwd: '/tmp',
+  });
+  assert.ok(result.args.includes('openai_base_url="[CONFIGURED]"'));
+  assert.equal(result.args.some((value) => String(value).includes('private-gateway.example')), false);
 });
 
 test('Codex JSONL parser aggregates thread.started, agent message, and usage', () => {

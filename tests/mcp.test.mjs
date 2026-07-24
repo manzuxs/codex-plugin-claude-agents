@@ -43,7 +43,7 @@ test('dashboard validates configuration against Runner capabilities before persi
   assert.doesNotThrow(() => validateRunnerConfig('codex', { effort: 'default', permissionMode: 'bypassPermissions' }));
   assert.doesNotThrow(() => validateRunnerConfig('codex', { effort: 'xhigh' }));
   assert.throws(() => validateRunnerConfig('codex', { effort: 'extreme' }), /Codex CLI effort must be one of:/);
-  assert.throws(() => validateRunnerConfig('codex', { gatewayUrl: 'http://localhost:8080' }), /does not expose gatewayUrl/);
+  assert.doesNotThrow(() => validateRunnerConfig('codex', { gatewayUrl: 'http://localhost:8080', apiKey: 'secret' }));
   assert.throws(() => validateRunnerConfig('agy', { outputFormat: 'stream-json' }), /does not expose outputFormat/);
 });
 
@@ -140,6 +140,7 @@ test('dashboard serves browser modules with JavaScript MIME types', async () => 
 test('dashboard enforces token, body, static path, task API, and SSE boundaries', async () => {
   const agent = { id: 'backend-engineer', name: '后端工程师', prefix: 'BACKEND_ENGINEER' };
   let capturedRun;
+  let capturedModels;
   const configWrites = [];
   const service = {
     registry: { byId: new Map([[agent.id, agent]]), byAlias: new Map() },
@@ -151,7 +152,7 @@ test('dashboard enforces token, body, static path, task API, and SSE boundaries'
       readEvents: () => ({ events: [{ seq: 1, type: 'system', subtype: 'init' }], cursor: 1 }),
     },
     listAgents: () => [agent],
-    listModels: async ({ runner }) => ({ runner, models: [{ id: 'gpt-test' }], source: 'test', authoritative: true }),
+    listModels: async (input) => { capturedModels = input; return { runner: input.runner, models: [{ id: 'gpt-test' }], source: 'test', authoritative: true }; },
     runtimeFor: () => ({}),
     status: (jobId) => jobId ? { jobId, status: 'completed' } : [],
     writeAgentConfig: (input) => { configWrites.push(input); return { database: '/tmp/claude-agents.sqlite' }; },
@@ -175,6 +176,24 @@ test('dashboard enforces token, body, static path, task API, and SSE boundaries'
     const models = await fetch(`${running.url}/api/models?runner=codex&agent=${agent.id}`, { headers: { 'x-claude-agents-token': token } });
     assert.equal(models.status, 200);
     assert.deepEqual((await models.json()).models, [{ id: 'gpt-test' }]);
+    const gateway = 'https://gateway.example/v1';
+    const gatewayModels = await fetch(`${running.url}/api/models?runner=codex&agent=${agent.id}&gateway=${encodeURIComponent(gateway)}`, { headers: { 'x-claude-agents-token': token } });
+    assert.equal(gatewayModels.status, 200);
+    assert.equal(capturedModels.gatewayUrl, gateway);
+
+    const credential = 'temporary-secret';
+    const credentialModels = await fetch(`${running.url}/api/models`, {
+      method: 'POST',
+      headers: { 'x-claude-agents-token': token, 'content-type': 'application/json' },
+      body: JSON.stringify({ runner: 'codex', agent: agent.id, gatewayUrl: gateway, apiKeyKind: 'api_key', apiKey: credential }),
+    });
+    assert.equal(credentialModels.status, 200);
+    assert.equal(capturedModels.apiKeyKind, 'api_key');
+    assert.equal(capturedModels.apiKey, credential);
+    assert.equal(new URL(credentialModels.url || `${running.url}/api/models`).searchParams.has('apiKey'), false);
+
+    const dashboardHtml = fs.readFileSync(path.join(pluginRoot, 'dashboard', 'index.html'), 'utf8');
+    assert.ok(dashboardHtml.indexOf('data-config-field="apiKey"') < dashboardHtml.indexOf('data-config-field="model"'));
 
     const missing = await fetch(`${running.url}/missing.js`);
     assert.equal(missing.status, 404);

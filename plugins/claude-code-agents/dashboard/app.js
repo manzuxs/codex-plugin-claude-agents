@@ -615,7 +615,12 @@ function configContext() {
   return { agent, runner, runnerId, config, capabilities, fields: visibleConfigFields(capabilities, agent?.id) };
 }
 function modelCatalogKey(context) {
-  return `${context.agent?.id || ''}:${context.runnerId}`;
+  const gatewayUrl = context.fields.has('gatewayUrl') ? $('#cfg-gateway').value.trim() : '';
+  const apiKeyKind = context.fields.has('apiKeyKind') ? $('#cfg-key-kind').value : '';
+  const apiKey = context.fields.has('apiKey') ? $('#cfg-api-key').value : '';
+  let fingerprint = 2166136261;
+  for (const char of apiKey) fingerprint = Math.imul(fingerprint ^ char.charCodeAt(0), 16777619);
+  return `${context.agent?.id || ''}:${context.runnerId}:${gatewayUrl}:${apiKeyKind}:${fingerprint >>> 0}`;
 }
 function setConfigFieldVisibility(context) {
   document.querySelectorAll('[data-config-field]').forEach((element) => {
@@ -663,9 +668,19 @@ function renderModelCatalog(context, catalog) {
     'agy-models': 'Antigravity CLI',
   };
   if (catalog?.warning) $('#cfg-model-status').textContent = '未能加载模型列表，可继续手工输入';
-  else if (catalog?.authoritative && count) $('#cfg-model-status').textContent = `已从 ${sourceLabels[catalog.source] || 'Runner CLI'} 加载 ${count} 个模型`;
+  else if (catalog?.authoritative && count) $('#cfg-model-status').textContent = `${modelDiscoveryGateway(context) ? '已从 API 网关' : `已从 ${sourceLabels[catalog.source] || 'Runner CLI'}`} 加载 ${count} 个模型`;
   else if (count) $('#cfg-model-status').textContent = 'CLI 未提供完整列表，当前显示其帮助中的模型示例';
   else $('#cfg-model-status').textContent = 'Runner 未提供模型列表，可继续手工输入';
+}
+function modelDiscoveryGateway(context) {
+  return context.fields.has('gatewayUrl') ? $('#cfg-gateway').value.trim() : '';
+}
+function modelDiscoveryPayload(context) {
+  const payload = { runner: context.runnerId, agent: context.agent.id, cwd: state.cwd || '' };
+  if (context.fields.has('gatewayUrl')) payload.gatewayUrl = modelDiscoveryGateway(context);
+  if (context.fields.has('apiKeyKind')) payload.apiKeyKind = $('#cfg-key-kind').value;
+  if (context.fields.has('apiKey') && $('#cfg-api-key').value) payload.apiKey = $('#cfg-api-key').value;
+  return payload;
 }
 async function loadModelCatalog(context) {
   if (!context.fields.has('model')) return;
@@ -674,8 +689,7 @@ async function loadModelCatalog(context) {
   const requestId = state.modelRequestId += 1;
   $('#cfg-model-status').textContent = '正在从 Runner CLI 加载模型…';
   try {
-    const query = new URLSearchParams({ runner: context.runnerId, agent: context.agent.id, cwd: state.cwd || '' });
-    const catalog = await api(`/api/models?${query}`);
+    const catalog = await post('/api/models', modelDiscoveryPayload(context));
     state.modelCatalogs.set(key, catalog);
     if (requestId === state.modelRequestId && modelCatalogKey(configContext()) === key) renderModelCatalog(context, catalog);
   } catch {
@@ -709,6 +723,7 @@ const modalMotion = createModalMotionController({
   reducedMotionFn: prefersReducedMotionNow,
 });
 let modalTrigger = null;
+let gatewayModelTimer = null;
 const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 function openModal(id) {
   modalTrigger = document.activeElement;
@@ -830,6 +845,15 @@ async function saveConfig() {
 $('#settings-open').addEventListener('click', () => openSettings('agent'));
 $('#config-agent').addEventListener('change', () => { rememberConfigSelection(); fillConfig(); });
 $('#config-runner').addEventListener('change', () => { rememberConfigSelection(); fillConfig(); });
+$('#cfg-gateway').addEventListener('input', () => {
+  clearTimeout(gatewayModelTimer);
+  gatewayModelTimer = setTimeout(() => { state.modelRequestId += 1; loadModelCatalog(configContext()); }, 300);
+});
+$('#cfg-key-kind').addEventListener('change', () => { state.modelRequestId += 1; loadModelCatalog(configContext()); });
+$('#cfg-api-key').addEventListener('input', () => {
+  clearTimeout(gatewayModelTimer);
+  gatewayModelTimer = setTimeout(() => { state.modelRequestId += 1; loadModelCatalog(configContext()); }, 300);
+});
 $('#cfg-model-toggle').addEventListener('click', () => {
   const context = configContext(); const catalog = state.modelCatalogs.get(modelCatalogKey(context));
   renderModelMenu(context, catalog);

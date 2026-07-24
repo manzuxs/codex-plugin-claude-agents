@@ -37,11 +37,14 @@ export function buildCodexInvocation({ pluginRoot, agent, runtime, request, cwd 
   const args = ['exec', '--json', '--cd', cwd || request.cwd || process.cwd()];
   if (runtime.model) args.push('--model', runtime.model);
   if (runtime.effort && runtime.effort !== 'default') args.push('--config', `model_reasoning_effort="${runtime.effort}"`);
+  if (runtime.gatewayUrl) args.push('--config', `openai_base_url=${JSON.stringify(runtime.gatewayUrl)}`);
   if (runtime.permissionMode === 'bypassPermissions') args.push('--dangerously-bypass-approvals-and-sandbox');
   else if (runtime.permissionMode === 'plan') args.push('--sandbox', 'read-only');
   else if (runtime.permissionMode === 'auto' || runtime.permissionMode === 'default') args.push('--sandbox', 'workspace-write');
   args.push('--', prompt);
-  return { command: runtime.codexBin, args, env: { ...process.env, ...runtime.extraEnv }, prompt, promptFile };
+  const env = { ...process.env, ...runtime.extraEnv };
+  if (runtime.apiKey) env.CODEX_API_KEY = runtime.apiKey;
+  return { command: runtime.codexBin, args, env, prompt, promptFile };
 }
 
 function parseJsonLines(stdout) {
@@ -87,6 +90,11 @@ export function parseCodexOutput(stdout) {
 
 function redactArgs(args) {
   const safe = [...args];
+  for (let index = 0; index < safe.length - 1; index += 1) {
+    if (safe[index] === '--config' && String(safe[index + 1]).startsWith('openai_base_url=')) {
+      safe[index + 1] = 'openai_base_url="[CONFIGURED]"';
+    }
+  }
   const promptIndex = safe.indexOf('--');
   if (promptIndex >= 0) safe[promptIndex + 1] = '[DELEGATION_XML_REDACTED_FROM_PREVIEW]';
   return safe;
