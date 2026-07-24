@@ -115,16 +115,16 @@
       <div class="settings-pane active" data-settings-pane="agent">
         <div class="form-grid config-target-grid"><label class="field-label">选择角色<select id="config-agent"></select></label><label class="field-label">配置 Runner<select id="config-runner"><option value="default">默认 Runner</option><option value="claude">Claude Code</option><option value="codex">Codex CLI</option><option value="grok">Grok CLI</option><option value="agy">Antigravity CLI</option></select></label></div>
         <div class="form-grid">
-          <label class="field-label">模型<input id="cfg-model" placeholder="sonnet"></label>
-          <label class="field-label">思考强度<select id="cfg-effort"><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option><option value="max">最大</option></select></label>
-          <label class="field-label">权限模式<select id="cfg-permission"><option value="auto">自动确认</option><option value="plan">仅规划</option><option value="acceptEdits">自动接受编辑</option><option value="bypassPermissions">跳过权限确认</option></select></label>
-          <label class="field-label">输出格式<select id="cfg-output"><option value="text">文本</option><option value="json">JSON</option><option value="stream-json">流式 JSON</option></select></label>
-          <label class="field-label">超时时间（毫秒）<input id="cfg-timeout" type="number" min="1000" step="1000"></label>
-          <label class="field-label">预算上限（USD）<input id="cfg-budget" type="number" min="0" step="0.1"></label>
-          <label class="field-label">API 网关<input id="cfg-gateway" placeholder="https://…"></label>
-          <label class="field-label">凭据类型<select id="cfg-key-kind"><option value="auth_token">认证令牌</option><option value="api_key">API 密钥</option></select></label>
-          <label class="field-label">更新凭据<input id="cfg-api-key" type="password" placeholder="留空保持不变"></label>
-          <label class="field-label browser-profiles">浏览器 MCP Profiles（JSON）<textarea id="cfg-browser-profiles" rows="3" placeholder='{"playwright":"/absolute/path/mcp.json"}'></textarea></label>
+          <div class="field-label" data-config-field="model"><label for="cfg-model">模型</label><div class="model-combobox"><input id="cfg-model" role="combobox" aria-autocomplete="list" aria-controls="cfg-model-menu" aria-expanded="false" autocomplete="off" placeholder="sonnet"><button id="cfg-model-toggle" type="button" aria-label="选择已发现的模型" title="选择已发现的模型"></button><div class="model-menu hidden" id="cfg-model-menu" role="listbox"></div></div><small id="cfg-model-status"></small></div>
+          <label class="field-label" data-config-field="effort">思考强度<select id="cfg-effort"><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option><option value="max">最大</option></select></label>
+          <label class="field-label" data-config-field="permissionMode">权限模式<select id="cfg-permission"><option value="auto">自动确认</option><option value="plan">仅规划</option><option value="acceptEdits">自动接受编辑</option><option value="bypassPermissions">跳过权限确认</option></select></label>
+          <label class="field-label" data-config-field="outputFormat">输出格式<select id="cfg-output"><option value="text">文本</option><option value="json">JSON</option><option value="stream-json">流式 JSON</option></select></label>
+          <label class="field-label" data-config-field="timeoutMs">超时时间（毫秒）<input id="cfg-timeout" type="number" min="1000" step="1000"></label>
+          <label class="field-label" data-config-field="maxBudgetUsd">预算上限（USD）<input id="cfg-budget" type="number" min="0" step="0.1"></label>
+          <label class="field-label" data-config-field="gatewayUrl">API 网关<input id="cfg-gateway" placeholder="https://…"></label>
+          <label class="field-label" data-config-field="apiKeyKind">凭据类型<select id="cfg-key-kind"><option value="auth_token">认证令牌</option><option value="api_key">API 密钥</option></select></label>
+          <label class="field-label" data-config-field="apiKey">更新凭据<input id="cfg-api-key" type="password" placeholder="留空保持不变"></label>
+          <label class="field-label browser-profiles" data-config-field="browserMcpConfigsJson">浏览器 MCP Profiles（JSON）<textarea id="cfg-browser-profiles" rows="3" placeholder='{"playwright":"/absolute/path/mcp.json"}'></textarea></label>
         </div>
         <div class="modal-actions"><button class="primary-button" id="config-save" type="button">保存并应用</button></div>
       </div>

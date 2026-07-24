@@ -1,5 +1,6 @@
 import { createMotionSnapshot, diffDashboardMotion, mergeStreamJobMeta, meaningfulJobMetaEqual, sessionStatusFor, chartFingerprint, resourceRows, resourceFingerprint, resourceDirtyKeys, patchResourceRows, dashboardMeaningfulChange, createReconnectState, agentNodeRecords, agentNodeFingerprint, triggerMotion, removeAfterMotion, applyTopologyLinkGeometry, topologyLinkGeometry, shouldAnimateLinkTransition, statusClassFor, createModalMotionController } from './dashboard-motion.mjs';
 import { createDashboardScheduler } from './dashboard-scheduler.mjs';
+import { capabilityOptions, effortOptionsForModel, visibleConfigFields } from './dashboard-config.mjs';
 
 const token = document.querySelector('meta[name="dashboard-token"]').content;
 const state = {
@@ -7,6 +8,7 @@ const state = {
   events: [], cursor: 0, result: null, tab: 'events', stream: null,
   streamState: 'idle', lastUpdate: null,
   reconnect: createReconnectState(),
+  modelCatalogs: new Map(), modelRequestId: 0,
   motionSnapshot: createMotionSnapshot(), chartFingerprint: '', resourceData: null, resourceFingerprint: '', resourceDimensions: {}, resourceRows: new Map(), resizeFrame: null,
 };
 const FALLBACK_RUNNERS = [
@@ -132,7 +134,10 @@ function createCustomSelect(native) {
 function enhanceSelects() {
   document.querySelectorAll('select').forEach((native) => createCustomSelect(native));
 }
-document.addEventListener('click', () => closeCustomSelects());
+document.addEventListener('click', (event) => {
+  closeCustomSelects();
+  if (!event.target.closest('.model-combobox')) setModelMenuOpen(false);
+});
 const api = async (path, options = {}) => {
   const response = await fetch(path, { ...options, headers: { 'content-type': 'application/json', 'x-claude-agents-token': token, ...(options.headers || {}) } });
   const value = await response.json();
@@ -591,7 +596,7 @@ function renderConfigOptions() {
   syncCustomSelect(runnerSelect);
 }
 const configOptionLabels = {
-  default: '默认', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最大',
+  default: '默认', none: '无', minimal: '最小', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最大', ultra: '超高',
   auto: '自动确认', plan: '仅规划', acceptEdits: '自动接受编辑', bypassPermissions: '跳过权限确认', dontAsk: '禁止询问',
   text: '文本', json: 'JSON', 'stream-json': '流式 JSON',
 };
@@ -601,14 +606,94 @@ function fillCapabilitySelect(selector, values, configuredValue, fallbackValue) 
   select.value = supported.includes(configuredValue) ? configuredValue : supported.includes(fallbackValue) ? fallbackValue : supported[0];
   syncCustomSelect(select);
 }
+function configContext() {
+  const agent = state.agents.find((item) => item.id === $('#config-agent').value) || state.agents[0];
+  const runner = $('#config-runner').value || 'default';
+  const config = runner === 'default' ? (agent?.configured || {}) : (agent?.configuredByRunner?.[runner] || {});
+  const runnerId = runner === 'default' ? (config.runner || agent?.runtime?.runner || 'claude') : runner;
+  const capabilities = state.runners.find((item) => item.id === runnerId)?.capabilities || {};
+  return { agent, runner, runnerId, config, capabilities, fields: visibleConfigFields(capabilities, agent?.id) };
+}
+function modelCatalogKey(context) {
+  return `${context.agent?.id || ''}:${context.runnerId}`;
+}
+function setConfigFieldVisibility(context) {
+  document.querySelectorAll('[data-config-field]').forEach((element) => {
+    element.classList.toggle('is-hidden', !context.fields.has(element.dataset.configField));
+  });
+}
+function matchingModel(context, catalog) {
+  const value = $('#cfg-model').value.trim();
+  return (catalog?.models || []).find((model) => model.id === value);
+}
+function applyModelEfforts(context, catalog, preferred = $('#cfg-effort').value || context.config.effort) {
+  const values = effortOptionsForModel(context.capabilities, matchingModel(context, catalog));
+  fillCapabilitySelect('#cfg-effort', values, preferred, context.capabilities.defaultEffort || 'default');
+}
+function setModelMenuOpen(open) {
+  const combo = $('#cfg-model').closest('.model-combobox');
+  const menu = $('#cfg-model-menu');
+  combo.classList.toggle('is-open', open);
+  menu.classList.toggle('hidden', !open);
+  $('#cfg-model').setAttribute('aria-expanded', String(open));
+}
+function renderModelMenu(context, catalog, filter = '') {
+  const normalized = filter.trim().toLowerCase();
+  const models = (catalog?.models || []).filter((model) => !normalized
+    || `${model.id} ${model.displayName} ${model.description}`.toLowerCase().includes(normalized));
+  const menu = $('#cfg-model-menu');
+  menu.innerHTML = models.map((model) => `<button class="model-option" type="button" role="option" data-model="${esc(model.id)}"><strong>${esc(model.displayName || model.id)}</strong>${model.isDefault ? '<span>默认</span>' : ''}<small>${esc(model.id)}${model.description ? ` · ${esc(model.description)}` : ''}</small></button>`).join('');
+  menu.querySelectorAll('[data-model]').forEach((button) => button.addEventListener('click', () => {
+    $('#cfg-model').value = button.dataset.model;
+    setModelMenuOpen(false);
+    applyModelEfforts(context, catalog);
+  }));
+}
+function renderModelCatalog(context, catalog) {
+  if (!$('#cfg-model').value.trim()) {
+    const defaultModel = (catalog?.models || []).find((model) => model.isDefault);
+    if (defaultModel) $('#cfg-model').value = defaultModel.id;
+  }
+  renderModelMenu(context, catalog);
+  applyModelEfforts(context, catalog, context.config.effort);
+  const count = catalog?.models?.length || 0;
+  const sourceLabels = {
+    'codex-app-server': 'Codex CLI',
+    'grok-models': 'Grok CLI',
+    'agy-models': 'Antigravity CLI',
+  };
+  if (catalog?.warning) $('#cfg-model-status').textContent = '未能加载模型列表，可继续手工输入';
+  else if (catalog?.authoritative && count) $('#cfg-model-status').textContent = `已从 ${sourceLabels[catalog.source] || 'Runner CLI'} 加载 ${count} 个模型`;
+  else if (count) $('#cfg-model-status').textContent = 'CLI 未提供完整列表，当前显示其帮助中的模型示例';
+  else $('#cfg-model-status').textContent = 'Runner 未提供模型列表，可继续手工输入';
+}
+async function loadModelCatalog(context) {
+  if (!context.fields.has('model')) return;
+  const key = modelCatalogKey(context);
+  if (state.modelCatalogs.has(key)) return renderModelCatalog(context, state.modelCatalogs.get(key));
+  const requestId = state.modelRequestId += 1;
+  $('#cfg-model-status').textContent = '正在从 Runner CLI 加载模型…';
+  try {
+    const query = new URLSearchParams({ runner: context.runnerId, agent: context.agent.id, cwd: state.cwd || '' });
+    const catalog = await api(`/api/models?${query}`);
+    state.modelCatalogs.set(key, catalog);
+    if (requestId === state.modelRequestId && modelCatalogKey(configContext()) === key) renderModelCatalog(context, catalog);
+  } catch {
+    const catalog = { models: [], source: 'unavailable', authoritative: false, warning: 'unavailable' };
+    if (requestId === state.modelRequestId && modelCatalogKey(configContext()) === key) renderModelCatalog(context, catalog);
+  }
+}
 function fillConfig() {
-  const agent = state.agents.find((item) => item.id === $('#config-agent').value) || state.agents[0]; const runner = $('#config-runner').value || 'default'; const config = runner === 'default' ? (agent?.configured || {}) : (agent?.configuredByRunner?.[runner] || {});
-  const runnerId = runner === 'default' ? config.runner : runner; const capabilities = state.runners.find((item) => item.id === runnerId)?.capabilities || {};
-  fillCapabilitySelect('#cfg-effort', capabilities.effort, config.effort, capabilities.defaultEffort || 'high');
-  fillCapabilitySelect('#cfg-permission', capabilities.permissionMode, config.permissionMode, 'auto');
-  fillCapabilitySelect('#cfg-output', capabilities.outputFormat, config.outputFormat, capabilities.defaultOutputFormat || 'json');
-  $('#cfg-model').value = config.model || ''; $('#cfg-timeout').value = config.timeoutMs || 1800000; $('#cfg-budget').value = config.maxBudgetUsd ?? 0; $('#cfg-gateway').value = config.gatewayUrl || ''; $('#cfg-key-kind').value = config.apiKeyKind || 'auth_token'; $('#cfg-api-key').value = ''; $('#cfg-browser-profiles').value = config.browserMcpConfigsJson || '{}';
+  const context = configContext();
+  setConfigFieldVisibility(context);
+  fillCapabilitySelect('#cfg-effort', capabilityOptions(context.capabilities, 'effort'), context.config.effort, context.capabilities.defaultEffort || 'high');
+  fillCapabilitySelect('#cfg-permission', capabilityOptions(context.capabilities, 'permissionMode'), context.config.permissionMode, 'auto');
+  fillCapabilitySelect('#cfg-output', capabilityOptions(context.capabilities, 'outputFormat'), context.config.outputFormat, context.capabilities.defaultOutputFormat || 'json');
+  $('#cfg-model').value = context.config.model || context.capabilities.defaultModel || ''; $('#cfg-timeout').value = context.config.timeoutMs || 1800000; $('#cfg-budget').value = context.config.maxBudgetUsd ?? 0; $('#cfg-gateway').value = context.config.gatewayUrl || ''; $('#cfg-key-kind').value = context.config.apiKeyKind || context.capabilities.defaultApiKeyKind || 'auth_token'; $('#cfg-api-key').value = ''; $('#cfg-browser-profiles').value = context.config.browserMcpConfigsJson || '{}';
+  $('#cfg-model-menu').innerHTML = ''; setModelMenuOpen(false);
+  $('#cfg-model-status').textContent = '';
   syncCustomSelects();
+  loadModelCatalog(context);
 }
 function renderInstall() {
   const codex = Boolean(state.install?.codexAvailable); const market = Boolean(state.install?.marketplaceAvailable); const installed = Boolean(state.install?.installed);
@@ -725,14 +810,38 @@ async function install() {
   try { const result = await post('/api/install', {}); state.install = result.installation || state.install; renderInstall(); $('#install-output').textContent = [result.marketplace?.stdout, result.marketplace?.stderr, result.plugin?.stdout, result.plugin?.stderr].filter(Boolean).join('\n') || '插件安装或更新检查完成。'; showToast('插件状态已更新，重启 Codex 后新任务即可加载。', 'success'); await refreshBootstrap('interaction'); } catch (error) { $('#install-output').textContent = error.message; showToast(error.message, 'error'); } finally { $('#install-run').disabled = !state.install?.codexAvailable; }
 }
 async function saveConfig() {
-  const values = { model: $('#cfg-model').value.trim(), effort: $('#cfg-effort').value, permissionMode: $('#cfg-permission').value, outputFormat: $('#cfg-output').value, timeoutMs: $('#cfg-timeout').value, maxBudgetUsd: $('#cfg-budget').value, gatewayUrl: $('#cfg-gateway').value.trim(), apiKeyKind: $('#cfg-key-kind').value, browserMcpConfigsJson: $('#cfg-browser-profiles').value.trim() || '{}' };
-  if ($('#cfg-api-key').value) values.apiKey = $('#cfg-api-key').value;
+  const context = configContext();
+  const readers = {
+    model: () => $('#cfg-model').value.trim(),
+    effort: () => $('#cfg-effort').value,
+    permissionMode: () => $('#cfg-permission').value,
+    outputFormat: () => $('#cfg-output').value,
+    timeoutMs: () => $('#cfg-timeout').value,
+    maxBudgetUsd: () => $('#cfg-budget').value,
+    gatewayUrl: () => $('#cfg-gateway').value.trim(),
+    apiKeyKind: () => $('#cfg-key-kind').value,
+    apiKey: () => $('#cfg-api-key').value,
+    browserMcpConfigsJson: () => $('#cfg-browser-profiles').value.trim() || '{}',
+  };
+  const values = Object.fromEntries([...context.fields].map((field) => [field, readers[field]?.()]).filter(([, value]) => value !== undefined && value !== ''));
   try { rememberConfigSelection(); await post('/api/config', { agent: $('#config-agent').value, runner: $('#config-runner').value || 'default', values }); showToast('配置已保存到 SQLite，并将用于后续任务。', 'success'); await refreshBootstrap('interaction'); } catch (error) { showToast(error.message, 'error'); }
 }
 
 $('#settings-open').addEventListener('click', () => openSettings('agent'));
 $('#config-agent').addEventListener('change', () => { rememberConfigSelection(); fillConfig(); });
 $('#config-runner').addEventListener('change', () => { rememberConfigSelection(); fillConfig(); });
+$('#cfg-model-toggle').addEventListener('click', () => {
+  const context = configContext(); const catalog = state.modelCatalogs.get(modelCatalogKey(context));
+  renderModelMenu(context, catalog);
+  setModelMenuOpen($('#cfg-model-menu').classList.contains('hidden'));
+});
+$('#cfg-model').addEventListener('input', () => {
+  const context = configContext(); const catalog = state.modelCatalogs.get(modelCatalogKey(context));
+  renderModelMenu(context, catalog, $('#cfg-model').value); setModelMenuOpen(true); applyModelEfforts(context, catalog);
+});
+$('#cfg-model').addEventListener('change', () => {
+  const context = configContext(); applyModelEfforts(context, state.modelCatalogs.get(modelCatalogKey(context)));
+});
 $('#config-save').addEventListener('click', saveConfig);
 $('#install-run').addEventListener('click', install);
 $('#recent-refresh').addEventListener('click', () => refreshBootstrap('interaction').catch((error) => showToast(error.message, 'error')));

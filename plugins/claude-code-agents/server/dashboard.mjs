@@ -16,6 +16,12 @@ const PLUGIN_SELECTOR = `multi-cli-agents@${MARKETPLACE_NAME}`;
 export function validateRunnerConfig(runnerId, values = {}) {
   const runner = RUNNER_CAPABILITIES[runnerId];
   if (!runner) throw new Error(`Unknown runner "${runnerId}".`);
+  const configurable = new Set(runner.supports.configFields || []);
+  for (const [field, value] of Object.entries(values)) {
+    if (value !== undefined && value !== '' && !configurable.has(field)) {
+      throw new Error(`${runner.name} does not expose ${field} as a configurable field.`);
+    }
+  }
   for (const field of ['effort', 'permissionMode', 'outputFormat']) {
     const value = values[field];
     const supported = runner.supports[field] || [];
@@ -166,6 +172,15 @@ export async function startDashboard({ service, pluginRoot, port = 0, open = fal
           jobs: service.status(undefined, { limit: 100 }), cwd, configFile: service.config.filePath,
           installation: await readInstallation(),
         });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/models') {
+        const cwd = url.searchParams.get('cwd') || repoRoot;
+        const runner = url.searchParams.get('runner') || undefined;
+        const agent = url.searchParams.get('agent') || undefined;
+        const models = service.listModels
+          ? await service.listModels({ runner, agent, cwd })
+          : { runner, models: [], source: 'unavailable', authoritative: false };
+        return json(res, 200, models);
       }
       if (req.method === 'POST' && url.pathname === '/api/config') {
         const body = await readBody(req);

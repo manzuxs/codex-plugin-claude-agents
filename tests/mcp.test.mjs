@@ -40,10 +40,11 @@ enabled = true
 });
 
 test('dashboard validates configuration against Runner capabilities before persistence', () => {
-  assert.doesNotThrow(() => validateRunnerConfig('codex', { effort: 'default', permissionMode: 'bypassPermissions', outputFormat: 'stream-json' }));
+  assert.doesNotThrow(() => validateRunnerConfig('codex', { effort: 'default', permissionMode: 'bypassPermissions' }));
   assert.doesNotThrow(() => validateRunnerConfig('codex', { effort: 'xhigh' }));
   assert.throws(() => validateRunnerConfig('codex', { effort: 'extreme' }), /Codex CLI effort must be one of:/);
-  assert.throws(() => validateRunnerConfig('agy', { outputFormat: 'stream-json' }), /Antigravity CLI outputFormat must be one of: text/);
+  assert.throws(() => validateRunnerConfig('codex', { gatewayUrl: 'http://localhost:8080' }), /does not expose gatewayUrl/);
+  assert.throws(() => validateRunnerConfig('agy', { outputFormat: 'stream-json' }), /does not expose outputFormat/);
 });
 
 function isolatedEnv(name, extra = {}) {
@@ -123,12 +124,14 @@ test('MCP open_dashboard starts the local command center without opening a brows
 test('dashboard serves browser modules with JavaScript MIME types', async () => {
   const running = await startDashboard({ pluginRoot, service: {} });
   try {
-    const [app, helper] = await Promise.all([
+    const [app, helper, configHelper] = await Promise.all([
       fetch(`${running.url}/app.js`),
       fetch(`${running.url}/dashboard-motion.mjs`),
+      fetch(`${running.url}/dashboard-config.mjs`),
     ]);
     assert.equal(app.headers.get('content-type'), 'text/javascript; charset=utf-8');
     assert.equal(helper.headers.get('content-type'), 'text/javascript; charset=utf-8');
+    assert.equal(configHelper.headers.get('content-type'), 'text/javascript; charset=utf-8');
   } finally {
     await new Promise((resolve) => running.server.close(resolve));
   }
@@ -148,6 +151,7 @@ test('dashboard enforces token, body, static path, task API, and SSE boundaries'
       readEvents: () => ({ events: [{ seq: 1, type: 'system', subtype: 'init' }], cursor: 1 }),
     },
     listAgents: () => [agent],
+    listModels: async ({ runner }) => ({ runner, models: [{ id: 'gpt-test' }], source: 'test', authoritative: true }),
     runtimeFor: () => ({}),
     status: (jobId) => jobId ? { jobId, status: 'completed' } : [],
     writeAgentConfig: (input) => { configWrites.push(input); return { database: '/tmp/claude-agents.sqlite' }; },
@@ -167,6 +171,10 @@ test('dashboard enforces token, body, static path, task API, and SSE boundaries'
     const unauthorized = await fetch(`${running.url}/api/bootstrap`);
     assert.equal(unauthorized.status, 403);
     assert.equal((await unauthorized.json()).error, 'Invalid dashboard token.');
+
+    const models = await fetch(`${running.url}/api/models?runner=codex&agent=${agent.id}`, { headers: { 'x-claude-agents-token': token } });
+    assert.equal(models.status, 200);
+    assert.deepEqual((await models.json()).models, [{ id: 'gpt-test' }]);
 
     const missing = await fetch(`${running.url}/missing.js`);
     assert.equal(missing.status, 404);

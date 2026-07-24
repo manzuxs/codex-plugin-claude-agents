@@ -5,6 +5,7 @@ import { loadAgentRegistry, publicAgentView, resolveAgent, resolveAgentRuntime }
 import { loadLayeredEnv } from './env.mjs';
 import { assertWorkingDirectory } from './paths.mjs';
 import { createRunnerRegistry, listRunners, resolveRunner } from './runners/registry.mjs';
+import { discoverRunnerModels } from './runners/model-discovery.mjs';
 import { runAgent } from './execution/run-agent.mjs';
 import { buildEvidenceView } from './evidence.mjs';
 import { JobStore } from './job-store.mjs';
@@ -336,6 +337,7 @@ export class ClaudeAgentService {
     this.jobs = new JobStore(dataRoot);
     this.config = new ConfigStore(dataRoot);
     this.runners = createRunnerRegistry();
+    this.modelCache = new Map();
     this.ownedJobs = new Set();
     this.reconcileOrphans();
   }
@@ -348,7 +350,9 @@ export class ClaudeAgentService {
 
   writeAgentConfig({ agent, values, runner }) {
     if (runner && runner !== 'default') resolveRunner(this.runners, runner);
-    return this.config.writeAgentConfig({ agent, values, runner });
+    const result = this.config.writeAgentConfig({ agent, values, runner });
+    this.modelCache.clear();
+    return result;
   }
 
   listAgents({ cwd = process.cwd(), runner } = {}) {
@@ -360,6 +364,32 @@ export class ClaudeAgentService {
     const resolvedCwd = assertWorkingDirectory(cwd);
     const defaultRunner = this.runtimeFor(this.registry.agents[0], resolvedCwd).runner;
     return listRunners(this.runners, defaultRunner);
+  }
+
+  async listModels({ runner, agent, cwd = process.cwd() } = {}) {
+    const resolvedCwd = assertWorkingDirectory(cwd);
+    const resolvedAgent = resolveAgent(this.registry, agent || this.registry.agents[0].id);
+    const runtime = this.runtimeFor(resolvedAgent, resolvedCwd, { runner });
+    const runnerId = runner || runtime.runner;
+    resolveRunner(this.runners, runnerId);
+    const command = runtime[`${runnerId}Bin`] || runnerId;
+    const cacheKey = [runnerId, command, runtime.gatewayUrl, Boolean(runtime.apiKey)].join(':');
+    const cached = this.modelCache.get(cacheKey);
+    if (cached && Date.now() - cached.checkedAt < 60_000) return cached.value;
+    try {
+      const discovered = await discoverRunnerModels(runnerId, runtime, { cwd: resolvedCwd });
+      const value = { runner: runnerId, ...discovered };
+      this.modelCache.set(cacheKey, { checkedAt: Date.now(), value });
+      return value;
+    } catch (error) {
+      return {
+        runner: runnerId,
+        models: [],
+        source: 'unavailable',
+        authoritative: false,
+        warning: String(error?.message || error).slice(0, 512),
+      };
+    }
   }
 
   async run(input) {
