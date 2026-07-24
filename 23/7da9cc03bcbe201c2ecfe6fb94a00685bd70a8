@@ -1,0 +1,19 @@
+plugins/claude-code-agents/dashboard/app.js
+  s_bc535bf79dce50::t_8cd325c780e32d 461,463
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "237da9cc03bcbe201c2ecfe6fb94a00685bd70a8",
+  "prompts": {},
+  "sessions": {
+    "s_bc535bf79dce50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f93a9-8865-7fa1-a251-ffa6ba2453b3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
