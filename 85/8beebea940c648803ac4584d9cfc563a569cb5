@@ -1,0 +1,46 @@
+plugins/claude-code-agents/dashboard/dashboard-config.mjs
+  s_29cbca186958e5::t_42aa383020fd8e 1-20
+plugins/claude-code-agents/server/dashboard.mjs
+  s_29cbca186958e5::t_d57e95f95c1e72 19-24,176-183
+  s_29cbca186958e5::t_bd434025d2959e 184
+plugins/claude-code-agents/dashboard/styles.css
+  s_29cbca186958e5::t_42aa383020fd8e 203
+plugins/claude-code-agents/dashboard/app.js
+  s_29cbca186958e5::t_42aa383020fd8e 3,11
+  s_29cbca186958e5::t_75b42f6c301b2f 599,609-652,657-685,687-694,696,813-826,833-834,836-844
+  s_29cbca186958e5::t_9bd1c52577ea5a 653-656
+  s_29cbca186958e5::t_04481c76fcfa50 137-140
+  s_29cbca186958e5::t_a5d5e18f235578 835
+tests/model-discovery.test.mjs
+  s_29cbca186958e5::t_2e3321d000d548 62-63
+  s_29cbca186958e5::t_aa7fe929d6c67b 1-61,64-71
+plugins/claude-code-agents/server/lib/service.mjs
+  s_29cbca186958e5::t_d57e95f95c1e72 8,340,353-355,369-392
+  s_29cbca186958e5::t_e3b7c27d03fac2 393-394
+plugins/claude-code-agents/server/lib/runners/capabilities.mjs
+  s_29cbca186958e5::t_9bd1c52577ea5a 27,45
+  s_29cbca186958e5::t_702ea55941316b 15,18,34,52,55,71-74,77
+tests/mcp.test.mjs
+  s_29cbca186958e5::t_aa7fe929d6c67b 43,46-47,127,130,134,154,175-177
+  s_29cbca186958e5::t_1a849a65e56b67 178
+plugins/claude-code-agents/server/lib/runners/model-discovery.mjs
+  s_29cbca186958e5::t_702ea55941316b 1-174
+plugins/claude-code-agents/dashboard/index.html
+  s_29cbca186958e5::t_42aa383020fd8e 118-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "858beebea940c648803ac4584d9cfc563a569cb5",
+  "prompts": {},
+  "sessions": {
+    "s_29cbca186958e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f92d2-eaea-73c0-985f-8ca8878ec4d9",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "官笑明 <2291898215@qq.com>"
+    }
+  }
+}
